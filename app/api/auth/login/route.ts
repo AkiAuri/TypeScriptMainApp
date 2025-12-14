@@ -9,9 +9,11 @@ interface UserRow extends RowDataPacket {
     email: string;
     password: string;
     role: 'teacher' | 'admin' | 'student';
+    first_name: string | null;
+    last_name: string | null;
 }
 
-export async function POST(request:  NextRequest) {
+export async function POST(request: NextRequest) {
     try {
         const { username, password } = await request.json();
 
@@ -22,16 +24,21 @@ export async function POST(request:  NextRequest) {
             );
         }
 
-        // Query user by username or email
+        // Query user with profile data (LEFT JOIN)
         const [rows] = await pool.execute<UserRow[]>(
-            'SELECT id, username, email, password, role FROM users WHERE username = ? OR email = ?',
+            `SELECT 
+        u.id, u.username, u.email, u.password, u.role,
+        p.first_name, p.last_name
+       FROM users u
+       LEFT JOIN profiles p ON u.id = p. user_id
+       WHERE u. username = ?  OR u.email = ?`,
             [username, username]
         );
 
         if (rows.length === 0) {
             return NextResponse.json(
                 { error: 'Invalid credentials' },
-                { status:  401 }
+                { status: 401 }
             );
         }
 
@@ -47,14 +54,27 @@ export async function POST(request:  NextRequest) {
             );
         }
 
-        // Return user info (exclude password)
-        return NextResponse.json({
+        // Log login activity
+        await pool.execute(
+            'INSERT INTO activity_logs (user_id, action_type, description) VALUES (?, ?, ?)',
+            [user.id, 'login', `${user.username} logged in`]
+        );
+
+        // Build display name (profile name or username)
+        const fullName = [user.first_name, user.last_name]
+            .filter(Boolean)
+            .join(' ') || user.username;
+
+        return NextResponse. json({
             success: true,
             user: {
                 id: user.id,
                 username: user.username,
                 email: user.email,
-                role: user.role,
+                firstName: user.first_name,
+                lastName: user.last_name,
+                fullName,
+                role: user. role,
             },
         });
     } catch (error) {

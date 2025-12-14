@@ -165,7 +165,7 @@ export default function LoginPage({ onLogin, onBack }: LoginPageProps) {
                       <Input
                           id="username"
                           type="text"
-                          placeholder="Enter your username"
+                          placeholder="Enter your username or email"  // ← Updated placeholder
                           value={username}
                           onChange={(e) => setUsername(e.target.value)}
                           disabled={isLoading}
