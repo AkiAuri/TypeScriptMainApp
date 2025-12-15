@@ -17,7 +17,8 @@ import {
   FileText,
   RefreshCw,
   Loader2,
-  AlertCircle
+  AlertCircle,
+  Key
 } from "lucide-react"
 
 interface LogEntry {
@@ -26,7 +27,7 @@ interface LogEntry {
   action_type: "login" | "logout" | "submission" | "upload" | "create" | "update" | "delete"
   description: string | null
   created_at: string
-  username:  string | null
+  username: string | null
   full_name: string
 }
 
@@ -96,17 +97,23 @@ const getActionLabel = (type: string) => {
 const getTargetFromDescription = (description: string | null, actionType: string): string => {
   if (!description) return actionType. charAt(0).toUpperCase() + actionType.slice(1)
 
-  // Try to extract target from description
-  if (description. toLowerCase().includes("student")) return "Student"
-  if (description.toLowerCase().includes("teacher") || description.toLowerCase().includes("instructor")) return "Instructor"
-  if (description.toLowerCase().includes("admin")) return "Admin"
-  if (description.toLowerCase().includes("school year")) return "School Year"
-  if (description.toLowerCase().includes("semester")) return "Semester"
-  if (description.toLowerCase().includes("grade")) return "Grade Level"
-  if (description.toLowerCase().includes("section")) return "Section"
-  if (description.toLowerCase().includes("subject")) return "Subject"
-  if (description.toLowerCase().includes("logged in") || description.toLowerCase().includes("login")) return "Session"
-  if (description.toLowerCase().includes("logged out") || description.toLowerCase().includes("logout")) return "Session"
+  const desc = description.toLowerCase()
+
+  // Check for specific targets in order of specificity
+  if (desc.includes("password")) return "Password"
+  if (desc.includes("profile")) return "Profile"
+  if (desc.includes("student")) return "Student"
+  if (desc.includes("teacher") || desc.includes("instructor")) return "Instructor"
+  if (desc.includes("admin")) return "Admin"
+  if (desc. includes("school year")) return "School Year"
+  if (desc.includes("semester")) return "Semester"
+  if (desc.includes("grade level") || desc.includes("grade")) return "Grade Level"
+  if (desc.includes("section")) return "Section"
+  if (desc.includes("subject")) return "Subject"
+  if (desc.includes("enrolled") || desc.includes("assignment")) return "Enrollment"
+  if (desc.includes("assigned") || desc.includes("removed")) return "Assignment"
+  if (desc.includes("logged in") || desc.includes("login")) return "Session"
+  if (desc.includes("logged out") || desc.includes("logout")) return "Session"
 
   return actionType.charAt(0).toUpperCase() + actionType.slice(1)
 }
@@ -114,8 +121,8 @@ const getTargetFromDescription = (description: string | null, actionType: string
 const formatTime = (dateString: string) => {
   const date = new Date(dateString)
   const now = new Date()
-  const diff = now. getTime() - date.getTime()
-  const hours = Math. floor(diff / (1000 * 60 * 60))
+  const diff = now.getTime() - date.getTime()
+  const hours = Math.floor(diff / (1000 * 60 * 60))
   const minutes = Math.floor(diff / (1000 * 60))
 
   if (hours > 24) return date.toLocaleDateString()
@@ -137,10 +144,10 @@ export default function LogsPage() {
       if (!response.ok) {
         throw new Error("Failed to fetch logs")
       }
-      const data = await response. json()
+      const data = await response.json()
       setLogs(data)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "An error occurred")
+      setError(err instanceof Error ? err. message : "An error occurred")
     } finally {
       setIsLoading(false)
     }
@@ -168,7 +175,7 @@ export default function LogsPage() {
                 className="border-slate-600 text-slate-300 hover:bg-slate-700 bg-transparent"
                 disabled={isLoading}
             >
-              {isLoading ?  (
+              {isLoading ? (
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
               ) : (
                   <RefreshCw className="w-4 h-4 mr-2" />
@@ -212,12 +219,12 @@ export default function LogsPage() {
                   return (
                       <div
                           key={log.id}
-                          className="group bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700/50 rounded-lg p-5 hover:border-slate-600/80 transition-all hover:shadow-lg"
+                          className="group bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700/50 rounded-lg p-5 hover:border-slate-600/80 transition-all hover: shadow-lg"
                       >
                         <div className="flex items-start gap-4">
                           {/* Icon */}
-                          <div className={`p-2. 5 rounded-lg ${getActionColor(log.action_type)} flex-shrink-0`}>
-                            {getActionIcon(log. action_type)}
+                          <div className={`p-2.5 rounded-lg ${getActionColor(log.action_type)} flex-shrink-0`}>
+                            {getActionIcon(log.action_type)}
                           </div>
 
                           {/* Content */}

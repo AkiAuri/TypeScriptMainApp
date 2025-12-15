@@ -1,23 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
 import { RowDataPacket } from 'mysql2';
+import { logActivity, getAdminIdFromRequest } from '@/lib/activity-logger';
 
 interface ProfileRow extends RowDataPacket {
-    // From users table
     id: number;
     username: string;
     email: string;
     role: string;
-    // From profiles table
     profile_id: number | null;
-    first_name:  string | null;
-    middle_name:  string | null;
+    first_name: string | null;
+    middle_name: string | null;
     last_name: string | null;
     department: string | null;
     employee_id: string | null;
     phone: string | null;
     address: string | null;
-    date_of_birth:  string | null;
+    date_of_birth: string | null;
     profile_picture: string | null;
 }
 
@@ -25,36 +24,35 @@ interface ProfileRow extends RowDataPacket {
 export async function GET(request: NextRequest) {
     try {
         const { searchParams } = new URL(request.url);
-        const userId = searchParams. get('userId');
+        const userId = searchParams.get('userId');
 
         if (!userId) {
             return NextResponse.json(
                 { error: 'User ID is required' },
-                { status: 400 }
+                { status:  400 }
             );
         }
 
-        // JOIN users and profiles tables
         const [rows] = await pool.execute<ProfileRow[]>(
-            `SELECT 
-        u.id,
-        u.username,
-        u.email,
-        u. role,
-        u.created_at,
-        p.id as profile_id,
-        p. first_name,
-        p. middle_name,
-        p. last_name,
-        p. department,
-        p.employee_id,
-        p.phone,
-        p.address,
-        p.date_of_birth,
-        p.profile_picture
-      FROM users u
-      LEFT JOIN profiles p ON u.id = p.user_id
-      WHERE u.id = ?`,
+            `SELECT
+                 u.id,
+                 u.username,
+                 u.email,
+                 u.role,
+                 u.created_at,
+                 p.id as profile_id,
+                 p.first_name,
+                 p.middle_name,
+                 p.last_name,
+                 p.department,
+                 p.employee_id,
+                 p.phone,
+                 p.address,
+                 p.date_of_birth,
+                 p.profile_picture
+             FROM users u
+                      LEFT JOIN profiles p ON u. id = p.user_id
+             WHERE u.id = ?`,
             [userId]
         );
 
@@ -67,7 +65,6 @@ export async function GET(request: NextRequest) {
 
         const user = rows[0];
 
-        // Build full name from profile parts
         const fullName = [user.first_name, user.middle_name, user.last_name]
             .filter(Boolean)
             .join(' ') || user.username;
@@ -75,24 +72,22 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({
             success: true,
             user: {
-                // Auth data (from users table)
                 id: user.id,
                 username: user.username,
                 email: user.email,
                 role: user.role,
-                // Profile data (from profiles table)
                 profileId: user.profile_id,
                 firstName: user.first_name || '',
-                middleName: user. middle_name || '',
+                middleName: user.middle_name || '',
                 lastName: user.last_name || '',
                 fullName,
-                department: user. department || '',
+                department: user.department || '',
                 employeeId: user.employee_id || '',
                 phone: user.phone || '',
-                address: user.address || '',
+                address: user. address || '',
                 dateOfBirth: user.date_of_birth || '',
                 profilePicture: user.profile_picture || '',
-                hasProfile: user.profile_id !== null,
+                hasProfile: user. profile_id !== null,
             },
         });
     } catch (error) {
@@ -110,9 +105,10 @@ export async function PUT(request: NextRequest) {
         const { searchParams } = new URL(request.url);
         const userId = searchParams.get('userId');
         const body = await request.json();
+        const adminId = getAdminIdFromRequest(request);
 
         if (!userId) {
-            return NextResponse.json(
+            return NextResponse. json(
                 { error: 'User ID is required' },
                 { status: 400 }
             );
@@ -130,40 +126,40 @@ export async function PUT(request: NextRequest) {
         } = body;
 
         // Check if profile exists
-        const [existing] = await pool.execute<RowDataPacket[]>(
+        const [existing] = await pool. execute<RowDataPacket[]>(
             'SELECT id FROM profiles WHERE user_id = ?',
             [userId]
         );
 
         if (existing.length === 0) {
-            // Create new profile
             await pool.execute(
-                `INSERT INTO profiles 
-          (user_id, first_name, middle_name, last_name, department, employee_id, phone, address, date_of_birth)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                `INSERT INTO profiles
+                 (user_id, first_name, middle_name, last_name, department, employee_id, phone, address, date_of_birth)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [userId, firstName, middleName, lastName, department, employeeId, phone, address, dateOfBirth]
             );
         } else {
-            // Update existing profile
             await pool.execute(
-                `UPDATE profiles SET 
-          first_name = ?,
-          middle_name = ?,
-          last_name = ?,
-          department = ?,
-          employee_id = ?,
-          phone = ?,
-          address = ?,
-          date_of_birth = ? 
-         WHERE user_id = ? `,
+                `UPDATE profiles SET
+                                     first_name = ?,
+                                     middle_name = ?,
+                                     last_name = ?,
+                                     department = ?,
+                                     employee_id = ?,
+                                     phone = ?,
+                                     address = ?,
+                                     date_of_birth = ?
+                 WHERE user_id = ? `,
                 [firstName, middleName, lastName, department, employeeId, phone, address, dateOfBirth, userId]
             );
         }
 
-        // Log activity
-        await pool.execute(
-            'INSERT INTO activity_logs (user_id, action_type, description) VALUES (?, ?, ?)',
-            [userId, 'profile_updated', 'User updated their profile']
+        // ✅ Log activity
+        const fullName = [firstName, lastName]. filter(Boolean).join(' ') || 'User';
+        await logActivity(
+            adminId || parseInt(userId, 10),
+            'update',
+            `Profile updated for ${fullName}`
         );
 
         return NextResponse.json({
@@ -174,7 +170,7 @@ export async function PUT(request: NextRequest) {
         console.error('Profile update error:', error);
         return NextResponse.json(
             { error: 'Failed to update profile' },
-            { status: 500 }
+            { status:  500 }
         );
     }
 }

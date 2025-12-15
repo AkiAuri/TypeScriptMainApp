@@ -4,56 +4,60 @@ import { RowDataPacket } from 'mysql2';
 
 export async function GET() {
     try {
-        // Get school years count
-        const [schoolYears] = await pool.execute<RowDataPacket[]>(
+        // Get counts for stats
+        const [schoolYearsCount] = await pool.execute<RowDataPacket[]>(
             'SELECT COUNT(*) as count FROM school_years'
         );
-
-        // Get sections count
-        const [sections] = await pool.execute<RowDataPacket[]>(
+        const [sectionsCount] = await pool.execute<RowDataPacket[]>(
             'SELECT COUNT(*) as count FROM sections'
         );
-
-        // Get subjects count
-        const [subjects] = await pool.execute<RowDataPacket[]>(
+        const [subjectsCount] = await pool.execute<RowDataPacket[]>(
             'SELECT COUNT(*) as count FROM subjects'
         );
-
-        // Get instructors count (teachers)
-        const [instructors] = await pool.execute<RowDataPacket[]>(
+        const [instructorsCount] = await pool.execute<RowDataPacket[]>(
             "SELECT COUNT(*) as count FROM users WHERE role = 'teacher'"
         );
-
-        // Get students count
-        const [students] = await pool.execute<RowDataPacket[]>(
+        const [studentsCount] = await pool. execute<RowDataPacket[]>(
             "SELECT COUNT(*) as count FROM users WHERE role = 'student'"
         );
 
-        // Get recent activities
-        const [activities] = await pool.execute<RowDataPacket[]>(
-            `SELECT id, action_type, description, created_at 
-       FROM activity_logs 
-       ORDER BY created_at DESC 
-       LIMIT 10`
-        );
+        // Get recent activities with user info
+        const [activities] = await pool.execute<RowDataPacket[]>(`
+            SELECT 
+                al.id,
+                al.action_type,
+                al.description,
+                al.created_at,
+                u.username,
+                COALESCE(
+                    NULLIF(CONCAT_WS(' ', p.first_name, p.last_name), ''),
+                    u.username,
+                    'System'
+                ) as full_name
+            FROM activity_logs al
+            LEFT JOIN users u ON al.user_id = u.id
+            LEFT JOIN profiles p ON u.id = p.user_id
+            ORDER BY al.created_at DESC
+            LIMIT 10
+        `);
 
         return NextResponse.json({
             success: true,
             data: {
                 stats: {
-                    schoolYears:  schoolYears[0]?.count || 0,
-                    sections: sections[0]?.count || 0,
-                    subjects:  subjects[0]?.count || 0,
-                    instructors: instructors[0]?.count || 0,
-                    students: students[0]?.count || 0,
+                    schoolYears: schoolYearsCount[0]?.count || 0,
+                    sections: sectionsCount[0]?.count || 0,
+                    subjects: subjectsCount[0]?.count || 0,
+                    instructors: instructorsCount[0]?.count || 0,
+                    students:  studentsCount[0]?.count || 0,
                 },
                 activities: activities,
             },
         });
     } catch (error) {
-        console.error('Dashboard stats error:', error);
+        console.error('Dashboard error:', error);
         return NextResponse.json(
-            { error: 'Failed to fetch dashboard stats' },
+            { success: false, error: 'Failed to fetch dashboard data' },
             { status: 500 }
         );
     }

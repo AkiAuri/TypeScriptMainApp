@@ -1,34 +1,34 @@
-// Helper function to log activities from API routes (server-side)
+import pool from '@/lib/db';
+
+export type ActionType = 'login' | 'logout' | 'submission' | 'upload' | 'create' | 'update' | 'delete';
+
+/**
+ * Log an activity to the database
+ * @param adminUserId - The ID of the admin/user performing the action (null for system actions)
+ * @param actionType - The type of action being performed
+ * @param description - A description of the action
+ */
 export async function logActivity(
-    user_id: number | null,
-    action_type: "login" | "logout" | "submission" | "upload" | "create" | "update" | "delete",
+    adminUserId: number | null,
+    actionType: ActionType,
     description: string
-) {
+): Promise<void> {
     try {
-        // Direct database insert for server-side logging
-        const pool = (await import("@/lib/db")).default;
-        await pool.query(
-            `INSERT INTO activity_logs (user_id, action_type, description) VALUES (?, ?, ?)`,
-            [user_id, action_type, description]
-        )
+        await pool.execute(
+            'INSERT INTO activity_logs (user_id, action_type, description) VALUES (?, ?, ?)',
+            [adminUserId, actionType, description]
+        );
     } catch (error) {
-        console.error("Failed to log activity:", error)
+        console.error('Failed to log activity:', error);
+        // Don't throw - logging should not break the main operation
     }
 }
 
-// Helper function to log activities from client-side components
-export async function logActivityClient(
-    user_id: number | null,
-    action_type: "login" | "logout" | "submission" | "upload" | "create" | "update" | "delete",
-    description:  string
-) {
-    try {
-        await fetch("/api/admin/logs", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ user_id, action_type, description }),
-        })
-    } catch (error) {
-        console.error("Failed to log activity:", error)
-    }
+/**
+ * Helper to get admin ID from request headers
+ * Frontend should send 'x-admin-id' header with requests
+ */
+export function getAdminIdFromRequest(request: Request): number | null {
+    const adminId = request.headers.get('x-admin-id');
+    return adminId ? parseInt(adminId, 10) : null;
 }

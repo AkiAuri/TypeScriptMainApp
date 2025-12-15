@@ -2,22 +2,22 @@ import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import bcrypt from 'bcrypt';
+import { logActivity, getAdminIdFromRequest } from '@/lib/activity-logger';
 
 // GET - Fetch all users with profiles
 export async function GET() {
     try {
         const [rows] = await pool.execute<RowDataPacket[]>(
-            `SELECT 
-        u.id, u.username, u.email, u.role, u.created_at,
-        p.first_name, p.middle_name, p.last_name, p.department, p.employee_id
-       FROM users u
-       LEFT JOIN profiles p ON u.id = p.user_id
-       ORDER BY u.created_at DESC`
+            `SELECT
+                 u.id, u.username, u.email, u.role, u.created_at,
+                 p.first_name, p.middle_name, p.last_name, p.department, p.employee_id
+             FROM users u
+                      LEFT JOIN profiles p ON u.id = p.user_id
+             ORDER BY u.created_at DESC`
         );
 
-        // Map to include fullName
         const users = rows.map(user => ({
-            ...user,
+            ... user,
             fullName: [user.first_name, user.middle_name, user.last_name]
                 .filter(Boolean)
                 .join(' ') || user.username,
@@ -39,6 +39,7 @@ export async function GET() {
 // POST - Create new user with profile
 export async function POST(request: NextRequest) {
     try {
+        const adminId = getAdminIdFromRequest(request);
         const {
             username,
             email,
@@ -54,7 +55,7 @@ export async function POST(request: NextRequest) {
         if (!username || !email || !password || !role) {
             return NextResponse.json(
                 { error: 'Username, email, password, and role are required' },
-                { status:  400 }
+                { status: 400 }
             );
         }
 
@@ -73,15 +74,17 @@ export async function POST(request: NextRequest) {
         if (firstName || middleName || lastName || department || employeeId) {
             await pool.execute(
                 `INSERT INTO profiles (user_id, first_name, middle_name, last_name, department, employee_id)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+                 VALUES (?, ?, ?, ?, ?, ?)`,
                 [userId, firstName || null, middleName || null, lastName || null, department || null, employeeId || null]
             );
         }
 
-        // Log activity
-        await pool.execute(
-            'INSERT INTO activity_logs (user_id, action_type, description) VALUES (?, ?, ?)',
-            [userId, 'user_created', `New ${role} account created:  ${username}`]
+        // ✅ Log activity with admin who performed the action
+        const fullName = [firstName, lastName].filter(Boolean).join(' ') || username;
+        await logActivity(
+            adminId,
+            'create',
+            `Created new ${role}:  ${fullName} (${username})`
         );
 
         return NextResponse.json({

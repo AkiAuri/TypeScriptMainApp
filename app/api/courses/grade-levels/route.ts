@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
+import { logActivity, getAdminIdFromRequest } from '@/lib/activity-logger';
 
 // GET - Fetch grade levels by semester
-export async function GET(request: NextRequest) {
+export async function GET(request:  NextRequest) {
     try {
-        const { searchParams } = new URL(request. url);
+        const { searchParams } = new URL(request.url);
         const semesterId = searchParams.get('semesterId');
 
         if (!semesterId) {
@@ -13,18 +14,18 @@ export async function GET(request: NextRequest) {
         }
 
         const [rows] = await pool.execute<RowDataPacket[]>(`
-      SELECT 
-        gl.id, 
-        gl.name, 
-        gl.semester_id,
-        gl.created_at,
-        COUNT(DISTINCT sec.id) as section_count
-      FROM grade_levels gl
-      LEFT JOIN sections sec ON gl.id = sec.grade_level_id
-      WHERE gl.semester_id = ?
-      GROUP BY gl. id
-      ORDER BY gl.name ASC
-    `, [semesterId]);
+            SELECT
+                gl.id,
+                gl.name,
+                gl.semester_id,
+                gl.created_at,
+                COUNT(DISTINCT sec.id) as section_count
+            FROM grade_levels gl
+                     LEFT JOIN sections sec ON gl.id = sec.grade_level_id
+            WHERE gl.semester_id = ?
+            GROUP BY gl.id
+            ORDER BY gl.name ASC
+        `, [semesterId]);
 
         return NextResponse.json({ success: true, data: rows });
     } catch (error) {
@@ -36,6 +37,7 @@ export async function GET(request: NextRequest) {
 // POST - Create new grade level
 export async function POST(request:  NextRequest) {
     try {
+        const adminId = getAdminIdFromRequest(request);
         const { name, semesterId } = await request.json();
 
         if (!name || !semesterId) {
@@ -47,9 +49,16 @@ export async function POST(request:  NextRequest) {
             [name, semesterId]
         );
 
-        return NextResponse. json({
+        // ✅ Log activity
+        await logActivity(
+            adminId,
+            'create',
+            `Created new grade level: ${name}`
+        );
+
+        return NextResponse.json({
             success: true,
-            data: { id: result.insertId, name, semester_id: semesterId },
+            data: { id: result.insertId, name, semester_id:  semesterId },
         });
     } catch (error) {
         console.error('Create grade level error:', error);

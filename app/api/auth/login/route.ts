@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
 import { RowDataPacket } from 'mysql2';
 import bcrypt from 'bcrypt';
+import { logActivity } from '@/lib/activity-logger';
 
 interface UserRow extends RowDataPacket {
     id: number;
@@ -9,7 +10,7 @@ interface UserRow extends RowDataPacket {
     email: string;
     password: string;
     role: 'teacher' | 'admin' | 'student';
-    first_name: string | null;
+    first_name:  string | null;
     last_name: string | null;
 }
 
@@ -26,12 +27,12 @@ export async function POST(request: NextRequest) {
 
         // Query user with profile data (LEFT JOIN)
         const [rows] = await pool.execute<UserRow[]>(
-            `SELECT 
-        u.id, u.username, u.email, u.password, u.role,
-        p.first_name, p.last_name
-       FROM users u
-       LEFT JOIN profiles p ON u.id = p. user_id
-       WHERE u. username = ?  OR u.email = ?`,
+            `SELECT
+                 u.id, u.username, u.email, u.password, u.role,
+                 p.first_name, p.last_name
+             FROM users u
+                      LEFT JOIN profiles p ON u.id = p.user_id
+             WHERE u.username = ?  OR u.email = ?`,
             [username, username]
         );
 
@@ -54,18 +55,19 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Log login activity
-        await pool.execute(
-            'INSERT INTO activity_logs (user_id, action_type, description) VALUES (?, ?, ?)',
-            [user.id, 'login', `${user.username} logged in`]
-        );
-
         // Build display name (profile name or username)
         const fullName = [user.first_name, user.last_name]
             .filter(Boolean)
             .join(' ') || user.username;
 
-        return NextResponse. json({
+        // ✅ Log login activity
+        await logActivity(
+            user.id,
+            'login',
+            `${fullName} (${user.username}) logged in as ${user.role}`
+        );
+
+        return NextResponse.json({
             success: true,
             user: {
                 id: user.id,

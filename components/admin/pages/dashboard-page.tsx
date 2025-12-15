@@ -11,19 +11,20 @@ interface Activity {
   action_type: string
   description: string
   created_at:  string
+  full_name?:  string
 }
 
 interface Stats {
-  schoolYears:  number
+  schoolYears: number
   sections: number
   subjects: number
-  instructors:  number
+  instructors: number
   students: number
 }
 
 export default function AdminDashboardPage({ onNavigate }: AdminDashboardPageProps) {
   const [stats, setStats] = useState<Stats>({
-    schoolYears: 0,
+    schoolYears:  0,
     sections: 0,
     subjects: 0,
     instructors: 0,
@@ -60,14 +61,14 @@ export default function AdminDashboardPage({ onNavigate }: AdminDashboardPagePro
 
   // Format number with commas
   const formatNumber = (num: number): string => {
-    return num.toLocaleString()
+    return num. toLocaleString()
   }
 
   // Format relative time
   const formatRelativeTime = (dateString: string): string => {
     const date = new Date(dateString)
     const now = new Date()
-    const diffInSeconds = Math.floor((now. getTime() - date.getTime()) / 1000)
+    const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000)
 
     if (diffInSeconds < 60) return 'Just now'
     if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)} minutes ago`
@@ -76,29 +77,91 @@ export default function AdminDashboardPage({ onNavigate }: AdminDashboardPagePro
     return date.toLocaleDateString()
   }
 
-  // Get activity icon based on type
-  const getActivityIcon = (actionType: string): string => {
+  // Get activity icon based on action type and description
+  const getActivityIcon = (actionType: string, description?:  string): string => {
+    const desc = description?.toLowerCase() || ''
+
+    // First check by action type
     switch (actionType) {
-      case 'student_registered':  return '👨‍🎓'
-      case 'teacher_registered': return '🧑‍🏫'
-      case 'enrollment_updated': return '📝'
-      case 'semester_created': return '📅'
-      case 'login': return '🔑'
-      case 'logout': return '🚪'
-      default: return '📌'
+      case 'login':
+        return '🔑'
+      case 'logout':
+        return '🚪'
+      case 'create':
+        // Check what was created
+        if (desc.includes('student')) return '👨‍🎓'
+        if (desc. includes('teacher') || desc.includes('instructor')) return '🧑‍🏫'
+        if (desc.includes('admin')) return '👤'
+        if (desc.includes('school year')) return '📅'
+        if (desc.includes('semester')) return '📆'
+        if (desc. includes('grade')) return '📊'
+        if (desc.includes('section')) return '🏫'
+        if (desc. includes('subject')) return '📚'
+        if (desc.includes('enrolled') || desc.includes('assignment')) return '✅'
+        if (desc.includes('assigned')) return '🔗'
+        return '➕'
+      case 'update':
+        // Check what was updated
+        if (desc.includes('password')) return '🔐'
+        if (desc.includes('profile')) return '📝'
+        if (desc.includes('student')) return '👨‍🎓'
+        if (desc.includes('teacher') || desc.includes('instructor')) return '🧑‍🏫'
+        if (desc.includes('admin')) return '👤'
+        if (desc.includes('school year')) return '📅'
+        if (desc.includes('semester')) return '📆'
+        if (desc.includes('grade')) return '📊'
+        if (desc.includes('section')) return '🏫'
+        if (desc.includes('subject')) return '📚'
+        return '✏️'
+      case 'delete':
+        // Check what was deleted
+        if (desc.includes('student')) return '👨‍🎓'
+        if (desc.includes('teacher') || desc.includes('instructor')) return '🧑‍🏫'
+        if (desc.includes('admin')) return '👤'
+        if (desc.includes('removed')) return '❌'
+        return '🗑️'
+      case 'submission':
+        return '📄'
+      case 'upload':
+        return '📤'
+      default:
+        // Fallback - check description for legacy action types
+        if (desc.includes('student')) return '👨‍🎓'
+        if (desc.includes('teacher') || desc.includes('instructor')) return '🧑‍🏫'
+        if (desc.includes('enrollment')) return '📝'
+        if (desc.includes('semester')) return '📅'
+        return '📌'
+    }
+  }
+
+  // Get action color class based on type
+  const getActionColorClass = (actionType: string): string => {
+    switch (actionType) {
+      case 'login':
+        return 'bg-green-500/10 border-green-500/30'
+      case 'logout':
+        return 'bg-slate-500/10 border-slate-500/30'
+      case 'create':
+        return 'bg-green-500/10 border-green-500/30'
+      case 'update':
+        return 'bg-blue-500/10 border-blue-500/30'
+      case 'delete':
+        return 'bg-red-500/10 border-red-500/30'
+      default:
+        return 'bg-slate-500/10 border-slate-500/30'
     }
   }
 
   const statsConfig = [
     { label: "School Years", value: formatNumber(stats.schoolYears), icon: "📅", key: 'schoolYears' },
-    { label: "Sections", value: formatNumber(stats. sections), icon: "🏫", key: 'sections' },
-    { label: "Subjects", value: formatNumber(stats. subjects), icon: "📚", key: 'subjects' },
-    { label: "Instructors", value: formatNumber(stats. instructors), icon: "🧑‍🏫", key: 'instructors' },
+    { label: "Sections", value: formatNumber(stats.sections), icon: "🏫", key: 'sections' },
+    { label: "Subjects", value: formatNumber(stats.subjects), icon: "📚", key:  'subjects' },
+    { label: "Instructors", value: formatNumber(stats.instructors), icon: "🧑‍🏫", key: 'instructors' },
     { label: "Students", value: formatNumber(stats.students), icon: "👨‍🎓", key: 'students' },
   ]
 
   const handleAddStudent = () => {
-    onNavigate?.("accounts", "students")
+    onNavigate?. ("accounts", "students")
   }
 
   const handleAddInstructor = () => {
@@ -107,6 +170,10 @@ export default function AdminDashboardPage({ onNavigate }: AdminDashboardPagePro
 
   const handleCreateSchoolYear = () => {
     onNavigate?.("courses")
+  }
+
+  const handleViewAllLogs = () => {
+    onNavigate?.("logs")
   }
 
   if (isLoading) {
@@ -133,7 +200,7 @@ export default function AdminDashboardPage({ onNavigate }: AdminDashboardPagePro
 
   if (error) {
     return (
-        <div className="space-y-6 p-4 md:p-8">
+        <div className="space-y-6 p-4 md: p-8">
           <div>
             <h1 className="text-3xl md:text-4xl font-bold text-white mb-2">Dashboard</h1>
             <p className="text-red-400">{error}</p>
@@ -185,26 +252,42 @@ export default function AdminDashboardPage({ onNavigate }: AdminDashboardPagePro
         <div className="grid gap-6 lg:grid-cols-2">
           {/* Recent Activities */}
           <div className="bg-slate-800/50 border border-slate-700/50 rounded-xl overflow-hidden">
-            <div className="bg-gradient-to-r from-blue-600/20 to-cyan-600/20 px-6 py-4 border-b border-slate-700/50">
-              <h3 className="font-bold text-white">Recent Activities</h3>
-              <p className="text-xs text-slate-400 mt-1">Latest system updates</p>
+            <div className="bg-gradient-to-r from-blue-600/20 to-cyan-600/20 px-6 py-4 border-b border-slate-700/50 flex justify-between items-center">
+              <div>
+                <h3 className="font-bold text-white">Recent Activities</h3>
+                <p className="text-xs text-slate-400 mt-1">Latest system updates</p>
+              </div>
+              <button
+                  onClick={handleViewAllLogs}
+                  className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+              >
+                View All →
+              </button>
             </div>
             <div className="p-6 space-y-2">
-              {activities.length === 0 ?  (
+              {activities.length === 0 ? (
                   <p className="text-slate-400 text-sm text-center py-4">No recent activities</p>
               ) : (
-                  activities.slice(0, 5).map((activity, index) => (
+                  activities. slice(0, 5).map((activity, index) => (
                       <div
                           key={activity.id}
-                          className={`py-3 flex justify-between items-start ${
-                              index < activities.length - 1 ? 'border-b border-slate-700/30' : ''
+                          className={`py-3 px-3 rounded-lg border ${getActionColorClass(activity.action_type)} flex justify-between items-start ${
+                              index < Math.min(activities.length, 5) - 1 ? 'mb-2' : ''
                           }`}
                       >
                         <div className="flex items-start gap-3">
-                          <span className="text-xl">{getActivityIcon(activity.action_type)}</span>
+                          <span className="text-xl">{getActivityIcon(activity. action_type, activity.description)}</span>
                           <div>
-                            <p className="font-medium text-white">{activity.description}</p>
-                            <p className="text-xs text-slate-400">{formatRelativeTime(activity. created_at)}</p>
+                            <p className="font-medium text-white text-sm">{activity.description}</p>
+                            <div className="flex items-center gap-2 mt-1">
+                              {activity.full_name && (
+                                  <>
+                                    <span className="text-xs text-slate-500">by {activity.full_name}</span>
+                                    <span className="text-xs text-slate-600">•</span>
+                                  </>
+                              )}
+                              <p className="text-xs text-slate-400">{formatRelativeTime(activity. created_at)}</p>
+                            </div>
                           </div>
                         </div>
                       </div>
