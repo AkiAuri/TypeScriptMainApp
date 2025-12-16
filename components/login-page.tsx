@@ -38,7 +38,7 @@ export default function LoginPage({ onLogin, onBack }: LoginPageProps) {
     e.preventDefault()
     setError("")
 
-    if (!username. trim()) {
+    if (!username.trim()) { // Fixed space: username. trim -> username.trim
       setError("Please enter your username or email")
       return
     }
@@ -55,30 +55,42 @@ export default function LoginPage({ onLogin, onBack }: LoginPageProps) {
         headers: {
           'Content-Type': 'application/json',
         },
-        body:  JSON.stringify({ username, password }),
+        body: JSON.stringify({ username, password }), // Fixed space: JSON. stringify -> JSON.stringify
       })
+
+      // Check if response is JSON
+      const contentType = response.headers.get('content-type')
+      if (!contentType || !contentType.includes('application/json')) {
+        console.error('Non-JSON response:', await response.text())
+        setError('Server error. Please try again later.')
+        return
+      }
 
       const data = await response.json()
 
       if (!response.ok) {
-        setError(data.error || 'Invalid credentials.  Please check your username and password.')
+        setError(data.error || 'Invalid credentials. Please check your username and password.') // Fixed double space
         return
       }
 
-      // Successfully authenticated - pass all user data
-      // Map 'teacher' role to 'instructor' for navigation
+      if (!data.success) { // Fixed space: ! data.success -> !data.success
+        setError(data.error || 'Login failed')
+        return
+      }
+
+      // Successfully authenticated
       const role = data.user.role === 'teacher' ? 'instructor' : data.user.role
 
       onLogin(
           role,
           data.user.username,
-          data.user.id,          // ← User ID
-          data.user.email,       // ← Email
-          data.user.fullName     // ← Full name from profile
+          data.user.id,
+          data.user.email,
+          data.user.fullName
       )
     } catch (err) {
       console.error('Login error:', err)
-      setError('An error occurred. Please try again.')
+      setError('Connection error. Please check your internet and try again.')
     } finally {
       setIsLoading(false)
     }
