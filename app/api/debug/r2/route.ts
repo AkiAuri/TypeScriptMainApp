@@ -8,6 +8,11 @@ async function getR2() {
     return { bucket, ctx };
 }
 
+// Add this to your route.ts file to allow browser testing
+export async function GET() {
+    return NextResponse.json({ message: "R2 Debug endpoint is active. Use POST to upload." });
+}
+
 // POST - Upload file to R2
 export async function POST(request: NextRequest) {
     try {
