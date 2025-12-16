@@ -1,30 +1,59 @@
-# UPDATEED LMS
+N: All the times. That I've tried. Still can't get throught to you...
+C: All the times. You and me. Our love goes wordlessly...
 
-*Automatically synced with your [v0.app](https://v0.app) deployments*
+N: All we do is write songs...
+C: Songs catch what words can't say...
+B: Can't say I've found the perfect one...
 
-[![Deployed on Vercel](https://img.shields.io/badge/Deployed%20on-Vercel-black?style=for-the-badge&logo=vercel)](https://vercel.com/federickgaming-6447s-projects/v0-updateed-lms)
-[![Built with v0](https://img.shields.io/badge/Built%20with-v0.app-black?style=for-the-badge)](https://v0.app/chat/Thvs4a32hHZ)
+C: Turns out we're a perfect pair...
+N: Turns out love is never fair...
+B: I'm craving much more of you!
 
-## Overview
 
-This repository will stay in sync with your deployed chats on [v0.app](https://v0.app).
-Any changes you make to your deployed app will be automatically pushed to this repository from [v0.app](https://v0.app).
+B: Still I'm holding on!
+B: Our love is stronger than this!
+B: Our love is strong!
+B: I'm holding on till it's better.
 
-## Deployment
 
-Your project is live at:
+N: Just a muse. To be used. Just when you need me...
+C: That's not true! I love you! Give me a chance and see!
 
-**[https://vercel.com/federickgaming-6447s-projects/v0-updateed-lms](https://vercel.com/federickgaming-6447s-projects/v0-updateed-lms)**
+N: But you're never really here...
+C: I can't focus when you're near...
 
-## Build your app
+N: Could not care less if you write more!
+C: Care less and just write more!
 
-Continue building your app on:
+C: Know how much this means to me...
+N: Please sort out your priority...
+C: When did-
+B: our live get so bittersweet?!
 
-**[https://v0.app/chat/Thvs4a32hHZ](https://v0.app/chat/Thvs4a32hHZ)**
 
-## How It Works
+B: Still I'm holding on!
 
-1. Create and modify your project using [v0.app](https://v0.app)
-2. Deploy your chats from the v0 interface
-3. Changes are automatically pushed to this repository
-4. Vercel deploys the latest version from this repository
+B: Our love is stronger than @!,s!
+
+B: Our love is strong!
+
+B: I'm holding on till it's better.
+
+
+N: You always need to be right!
+C: You always make it a fight!
+N: We're never-
+B: going far...
+B: If this is what you really are!!!
+
+
+B: You tell me you're fine then turn and whine, when will it stop?
+B: You tell me you're fine then turn and whine, when can we stop!?
+
+
+N: ALL YOU SAY IS HOW YOU'RE SORRY, GO AND WRITE YOUR SONGS AND LEAVE ME!
+C: I already said how I'm sorry! What more do you want from me?
+N: ALL YOU SAY IS HOW YOU'RE SORRY, GO AND WRITE YOUR SONGS AND LEAVE ME!
+C: I already said how I'm sorry! What more do you want from me?
+N: ALL YOU SAY IS HOW YOU'RE SORRY, GO AND WRITE YOUR SONGS-
+C: I already said how I'm sorry! What more do you want-
