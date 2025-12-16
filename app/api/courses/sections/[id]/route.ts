@@ -1,39 +1,75 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from "@/lib/db";
-import { RowDataPacket } from 'mysql2';
-import { logActivity, getAdminIdFromRequest } from '@/lib/activity-logger';
+
+async function getDB() {
+    const { getCloudflareContext } = await import('@opennextjs/cloudflare');
+    const ctx = await getCloudflareContext({ async: true });
+    const db = (ctx.env as any)?.DB;
+    if (!db) throw new Error('Database not configured');
+    return { db, ctx };
+}
+
+// GET - Fetch single section
+export async function GET(
+    request: NextRequest,
+    { params }: { params: Promise<{ id: string }> }
+) {
+    try {
+        const { db } = await getDB();
+        const { id } = await params;
+
+        const section = await db
+            .prepare('SELECT id, name, grade_level_id, school_year_id, created_at FROM sections WHERE id = ?')
+            .bind(id)
+            .first();
+
+        if (!section) {
+            return NextResponse.json({ error: 'Section not found' }, { status: 404 });
+        }
+
+        return NextResponse.json({ success: true, data: section });
+    } catch (error: any) {
+        console.error('Fetch section error:', error);
+        return NextResponse.json({ error: 'Failed to fetch section: ' + error.message }, { status: 500 });
+    }
+}
 
 // PUT - Update section
 export async function PUT(
     request: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
-        const pool = await getDb();
-        const adminId = getAdminIdFromRequest(request);
-        const { name } = await request. json();
-        const { id } = params;
+        const { db, ctx } = await getDB();
+        const { name } = await request.json();
+        const { id } = await params;
 
         // Get old name for logging
-        const [oldData] = await pool.execute<RowDataPacket[]>(
-            'SELECT name FROM sections WHERE id = ?',
-            [id]
-        );
-        const oldName = oldData[0]?.name;
+        const oldData = await db
+            .prepare('SELECT name FROM sections WHERE id = ?')
+            .bind(id)
+            .first<{ name: string }>();
 
-        await pool.execute('UPDATE sections SET name = ? WHERE id = ?', [name, id]);
+        const oldName = oldData?.name;
 
-        // ✅ Log activity
-        await logActivity(
-            adminId,
-            'update',
-            `Updated section: "${oldName}" to "${name}"`
-        );
+        await db
+            .prepare('UPDATE sections SET name = ? WHERE id = ?')
+            .bind(name, id)
+            .run();
+
+        // Log activity (non-blocking)
+        const logPromise = db
+            .prepare('INSERT INTO activity_logs (user_id, action_type, description) VALUES (?, ?, ?)')
+            .bind(null, 'update', `Updated section: "${oldName}" to "${name}"`)
+            .run();
+
+        if (ctx.ctx?.waitUntil) {
+            ctx.ctx.waitUntil(logPromise);
+        }
 
         return NextResponse.json({ success: true });
-    } catch (error) {
+    } catch (error: any) {
         console.error('Update section error:', error);
-        return NextResponse.json({ error: 'Failed to update section' }, { status:  500 });
+        return NextResponse.json({ error: 'Failed to update section: ' + error.message }, { status: 500 });
     }
 }
 
@@ -43,33 +79,41 @@ export async function DELETE(
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
-        const pool = await getDb();
-        const adminId = getAdminIdFromRequest(request);
+        const { db, ctx } = await getDB();
         const { id } = await params;
 
         // Get section info for logging
-        const [data] = await pool.execute<RowDataPacket[]>(
-            `SELECT s.name, gl.name as grade_level_name 
-            FROM sections s 
-            LEFT JOIN grade_levels gl ON s.grade_level_id = gl.id 
-            WHERE s.id = ? `,
-            [id]
-        );
-        const sectionName = data[0]?. name;
-        const gradeLevelName = data[0]?.grade_level_name;
+        const data = await db
+            .prepare(`
+                SELECT s.name, gl.name as grade_level_name 
+                FROM sections s 
+                LEFT JOIN grade_levels gl ON s.grade_level_id = gl.id 
+                WHERE s.id = ? 
+            `)
+            .bind(id)
+            .first<{ name: string; grade_level_name: string }>();
 
-        await pool.execute('DELETE FROM sections WHERE id = ?', [id]);
+        const sectionName = data?.name;
+        const gradeLevelName = data?.grade_level_name;
 
-        // ✅ Log activity
-        await logActivity(
-            adminId,
-            'delete',
-            `Deleted section: ${sectionName}${gradeLevelName ? ` from ${gradeLevelName}` : ''}`
-        );
+        await db
+            .prepare('DELETE FROM sections WHERE id = ?')
+            .bind(id)
+            .run();
+
+        // Log activity (non-blocking)
+        const logPromise = db
+            .prepare('INSERT INTO activity_logs (user_id, action_type, description) VALUES (?, ?, ?)')
+            .bind(null, 'delete', `Deleted section: ${sectionName}${gradeLevelName ? ` from ${gradeLevelName}` : ''}`)
+            .run();
+
+        if (ctx.ctx?.waitUntil) {
+            ctx.ctx.waitUntil(logPromise);
+        }
 
         return NextResponse.json({ success: true });
-    } catch (error) {
+    } catch (error: any) {
         console.error('Delete section error:', error);
-        return NextResponse.json({ error: 'Failed to delete section' }, { status: 500 });
+        return NextResponse.json({ error: 'Failed to delete section: ' + error.message }, { status: 500 });
     }
 }

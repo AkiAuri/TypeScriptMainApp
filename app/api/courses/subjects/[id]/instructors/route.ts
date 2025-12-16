@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from "@/lib/db";
-import { RowDataPacket } from 'mysql2';
-import { logActivity, getAdminIdFromRequest } from '@/lib/activity-logger';
+
+async function getDB() {
+    const { getCloudflareContext } = await import('@opennextjs/cloudflare');
+    const ctx = await getCloudflareContext({ async: true });
+    const db = (ctx.env as any)?.DB;
+    if (!db) throw new Error('Database not configured');
+    return { db, ctx };
+}
 
 // GET - Fetch instructors for a subject
 export async function GET(
@@ -9,80 +14,101 @@ export async function GET(
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
-        // Await the params
+        const { db } = await getDB();
         const { id } = await params;
-        const pool = await getDb();
 
-        const [assigned] = await pool.execute<RowDataPacket[]>(`
-            SELECT
-                u.id,
-                u.username,
-                u.email,
-                p.first_name,
-                p.middle_name,
-                p.last_name,
-                p.department,
-                p.employee_id
-            FROM subject_instructors si
-                     JOIN users u ON si.instructor_id = u.id
-                     LEFT JOIN profiles p ON u.id = p.user_id
-            WHERE si.subject_id = ?  AND u.role = 'teacher'
-        `, [id]);
+        const result = await db
+            .prepare(`
+                SELECT
+                    u.id,
+                    u.username,
+                    u.email,
+                    p.first_name,
+                    p.middle_name,
+                    p.last_name,
+                    p.department,
+                    p.employee_id
+                FROM subject_instructors si
+                JOIN users u ON si.instructor_id = u.id
+                LEFT JOIN profiles p ON u.id = p.user_id
+                WHERE si.subject_id = ? AND u.role = 'teacher'
+            `)
+            .bind(id)
+            .all();
 
-        return NextResponse.json({ success: true, data: assigned });
-    } catch (error) {
+        return NextResponse.json({ success: true, data: result.results });
+    } catch (error: any) {
         console.error('Fetch subject instructors error:', error);
-        return NextResponse.json({ error: 'Failed to fetch instructors' }, { status: 500 });
+        return NextResponse.json({ error: 'Failed to fetch instructors: ' + error.message }, { status: 500 });
     }
 }
 
 // POST - Assign instructor to subject
 export async function POST(
     request: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
-        const pool = await getDb();
-        const adminId = getAdminIdFromRequest(request);
-        const { id } = params;
+        const { db, ctx } = await getDB();
+        const { id } = await params;
         const { instructorId } = await request.json();
 
-        // Get instructor and subject names for logging
-        const [instructor] = await pool.execute<RowDataPacket[]>(
-            `SELECT u.username, p.first_name, p.last_name 
-            FROM users u 
-            LEFT JOIN profiles p ON u.id = p.user_id 
-            WHERE u.id = ?`,
-            [instructorId]
-        );
-        const [subject] = await pool.execute<RowDataPacket[]>(
-            'SELECT name FROM subjects WHERE id = ? ',
-            [id]
-        );
+        // Get instructor name for logging
+        const instructor = await db
+            .prepare(`
+                SELECT u.username, p.first_name, p.last_name 
+                FROM users u 
+                LEFT JOIN profiles p ON u.id = p.user_id 
+                WHERE u.id = ? 
+            `)
+            .bind(instructorId)
+            .first<{ username: string; first_name: string; last_name: string }>();
 
-        const instructorName = [instructor[0]?.first_name, instructor[0]?. last_name]
-            .filter(Boolean).join(' ') || instructor[0]?.username || 'Unknown';
-        const subjectName = subject[0]?. name || 'Unknown';
+        // Get subject name for logging
+        const subject = await db
+            .prepare('SELECT name FROM subjects WHERE id = ?')
+            .bind(id)
+            .first<{ name: string }>();
 
-        await pool.execute(
-            'INSERT INTO subject_instructors (subject_id, instructor_id) VALUES (?, ?)',
-            [id, instructorId]
-        );
+        const instructorName = [instructor?.first_name, instructor?.last_name]
+            .filter(Boolean).join(' ') || instructor?.username || 'Unknown';
+        const subjectName = subject?.name || 'Unknown';
 
-        // ✅ Log activity
-        await logActivity(
-            adminId,
-            'create',
-            `Assigned instructor ${instructorName} to ${subjectName}`
-        );
+        // Check if already assigned
+        const existing = await db
+            .prepare('SELECT id FROM subject_instructors WHERE subject_id = ? AND instructor_id = ?')
+            .bind(id, instructorId)
+            .first();
 
-        return NextResponse.json({ success: true });
-    } catch (error:  any) {
-        if (error.code === 'ER_DUP_ENTRY') {
+        if (existing) {
             return NextResponse.json({ error: 'Instructor already assigned' }, { status: 400 });
         }
+
+        await db
+            .prepare('INSERT INTO subject_instructors (subject_id, instructor_id, assigned_at) VALUES (?, ?, datetime(\'now\'))')
+            .bind(id, instructorId)
+            .run();
+
+        // Log activity (non-blocking)
+        const logPromise = db
+            .prepare('INSERT INTO activity_logs (user_id, action_type, description) VALUES (?, ?, ?)')
+            .bind(null, 'create', `Assigned instructor ${instructorName} to ${subjectName}`)
+            .run();
+
+        if (ctx.ctx?.waitUntil) {
+            ctx.ctx.waitUntil(logPromise);
+        }
+
+        return NextResponse.json({ success: true });
+    } catch (error: any) {
         console.error('Assign instructor error:', error);
-        return NextResponse. json({ error: 'Failed to assign instructor' }, { status: 500 });
+
+        // Check for unique constraint violation
+        if (error.message?.includes('UNIQUE constraint failed')) {
+            return NextResponse.json({ error: 'Instructor already assigned' }, { status: 400 });
+        }
+
+        return NextResponse.json({ error: 'Failed to assign instructor: ' + error.message }, { status: 500 });
     }
 }
 
@@ -92,44 +118,54 @@ export async function DELETE(
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
-        const pool = await getDb();
-        const adminId = getAdminIdFromRequest(request);
+        const { db, ctx } = await getDB();
         const { id } = await params;
-        const { searchParams } = new URL(request. url);
+        const { searchParams } = new URL(request.url);
         const instructorId = searchParams.get('instructorId');
 
-        // Get instructor and subject names for logging
-        const [instructor] = await pool.execute<RowDataPacket[]>(
-            `SELECT u.username, p.first_name, p.last_name 
-            FROM users u 
-            LEFT JOIN profiles p ON u.id = p.user_id 
-            WHERE u.id = ?`,
-            [instructorId]
-        );
-        const [subject] = await pool. execute<RowDataPacket[]>(
-            'SELECT name FROM subjects WHERE id = ?',
-            [id]
-        );
+        if (!instructorId) {
+            return NextResponse.json({ error: 'Instructor ID is required' }, { status: 400 });
+        }
 
-        const instructorName = [instructor[0]?.first_name, instructor[0]?.last_name]
-            .filter(Boolean).join(' ') || instructor[0]?.username || 'Unknown';
-        const subjectName = subject[0]?.name || 'Unknown';
+        // Get instructor name for logging
+        const instructor = await db
+            .prepare(`
+                SELECT u.username, p.first_name, p.last_name 
+                FROM users u 
+                LEFT JOIN profiles p ON u.id = p.user_id 
+                WHERE u.id = ?
+            `)
+            .bind(instructorId)
+            .first<{ username: string; first_name: string; last_name: string }>();
 
-        await pool.execute(
-            'DELETE FROM subject_instructors WHERE subject_id = ? AND instructor_id = ?',
-            [id, instructorId]
-        );
+        // Get subject name for logging
+        const subject = await db
+            .prepare('SELECT name FROM subjects WHERE id = ?')
+            .bind(id)
+            .first<{ name: string }>();
 
-        // ✅ Log activity
-        await logActivity(
-            adminId,
-            'delete',
-            `Removed instructor ${instructorName} from ${subjectName}`
-        );
+        const instructorName = [instructor?.first_name, instructor?.last_name]
+            .filter(Boolean).join(' ') || instructor?.username || 'Unknown';
+        const subjectName = subject?.name || 'Unknown';
+
+        await db
+            .prepare('DELETE FROM subject_instructors WHERE subject_id = ? AND instructor_id = ?')
+            .bind(id, instructorId)
+            .run();
+
+        // Log activity (non-blocking)
+        const logPromise = db
+            .prepare('INSERT INTO activity_logs (user_id, action_type, description) VALUES (?, ?, ?)')
+            .bind(null, 'delete', `Removed instructor ${instructorName} from ${subjectName}`)
+            .run();
+
+        if (ctx.ctx?.waitUntil) {
+            ctx.ctx.waitUntil(logPromise);
+        }
 
         return NextResponse.json({ success: true });
-    } catch (error) {
+    } catch (error: any) {
         console.error('Remove instructor error:', error);
-        return NextResponse.json({ error: 'Failed to remove instructor' }, { status: 500 });
+        return NextResponse.json({ error: 'Failed to remove instructor: ' + error.message }, { status: 500 });
     }
 }

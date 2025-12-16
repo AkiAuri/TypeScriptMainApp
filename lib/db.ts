@@ -1,85 +1,69 @@
-import { getCloudflareContext } from "@opennextjs/cloudflare";
+import { getCloudflareContext } from '@opennextjs/cloudflare';
 
-/**
- * Get the D1 database from Cloudflare context
- */
-export async function getDb(): Promise<D1Database> {
-    try {
-        const ctx = await getCloudflareContext();
-        const env = ctx.env as any;
+export async function getDB() {
+    const ctx = await getCloudflareContext({ async: true }); // Fixed space: async:  true
 
-        if (!env.DB) {
-            throw new Error('D1 database binding "DB" not found');
-        }
-
-        return env.DB; // Fixed space: env. DB -> env.DB
-    } catch (error) {
-        console.error('Failed to get D1 database:', error);
-        throw new Error('Database connection failed');
+    if (!ctx || !ctx.env) { // Fixed space: ctx. env
+        throw new Error('Cloudflare context not available');
     }
+
+    const db = (ctx.env as any).DB as D1Database;
+
+    if (!db) {
+        throw new Error('D1 database binding not found');
+    }
+
+    return { db, ctx };
 }
 
-/**
- * Execute a SELECT query and return multiple rows
- */
+// Query helper - returns array of results
 export async function query<T = any>(sql: string, params: any[] = []): Promise<T[]> { // Fixed space: params:  any[]
-    const db = await getDb();
+    const { db } = await getDB();
     const stmt = db.prepare(sql);
-
     const result = params.length > 0
         ? await stmt.bind(...params).all<T>()
         : await stmt.all<T>();
-
-    return result.results; // Fixed space: result. results -> result.results
+    return result.results;
 }
 
-/**
- * Execute a SELECT query and return a single row
- */
+// Query single row
 export async function queryOne<T = any>(sql: string, params: any[] = []): Promise<T | null> {
-    const db = await getDb();
+    const { db } = await getDB();
     const stmt = db.prepare(sql);
-
     const result = params.length > 0
         ? await stmt.bind(...params).first<T>()
         : await stmt.first<T>();
-
     return result;
 }
 
-/**
- * Execute an INSERT/UPDATE/DELETE query
- */
-export async function execute(
-    sql: string,
-    params: any[] = []
-): Promise<{ lastRowId: number; changes: number }> {
-    const db = await getDb();
+// Execute INSERT/UPDATE/DELETE
+export async function execute(sql: string, params: any[] = []): Promise<{ lastRowId: number; changes: number }> { // Fixed space: params:  any[]
+    const { db } = await getDB();
     const stmt = db.prepare(sql);
-
     const result = params.length > 0
-        ? await stmt.bind(...params).run() // Fixed space: ?  await -> ? await
+        ? await stmt.bind(...params).run()
         : await stmt.run();
-
     return {
-        lastRowId: result.meta.last_row_id, // Fixed spaces: result. meta. last_row_id -> result.meta.last_row_id
+        lastRowId: result.meta.last_row_id, // Fixed space: result. meta
         changes: result.meta.changes,
     };
 }
 
-/**
- * Execute multiple statements in a batch
- */
-export async function batch(
-    statements: { sql: string; params?: any[] }[] // Fixed space: params?:  any[]
-): Promise<D1Result<unknown>[]> {
-    const db = await getDb();
-    const preparedStatements = statements.map(({ sql, params }) => {
-        const stmt = db.prepare(sql);
-        return params && params.length > 0 ? stmt.bind(...params) : stmt;
-    });
+// Log activity with waitUntil
+export async function logActivity(userId: number | null, actionType: string, description: string) {
+    try {
+        const { db, ctx } = await getDB();
+        const promise = db
+            .prepare('INSERT INTO activity_logs (user_id, action_type, description) VALUES (?, ?, ?)') // Fixed space: ? ) -> ?)
+            .bind(userId, actionType, description)
+            .run();
 
-    return db.batch(preparedStatements);
+        if (ctx.ctx?.waitUntil) { // Fixed space: ctx.ctx?. waitUntil
+            ctx.ctx.waitUntil(promise);
+        } else {
+            promise.catch(console.error);
+        }
+    } catch (e) {
+        console.error('Activity logging failed:', e);
+    }
 }
-
-export default { getDb, query, queryOne, execute, batch };

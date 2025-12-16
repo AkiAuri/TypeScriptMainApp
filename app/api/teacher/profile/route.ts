@@ -1,76 +1,96 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from "@/lib/db";
-import { RowDataPacket } from 'mysql2';
 import { hash, compare, genSalt } from 'bcrypt-ts';
-import { logActivity, getAdminIdFromRequest } from '@/lib/activity-logger';
+
+async function getDB() {
+    const { getCloudflareContext } = await import('@opennextjs/cloudflare');
+    const ctx = await getCloudflareContext({ async: true });
+    const db = (ctx.env as any)?.DB;
+    if (!db) throw new Error('Database not configured');
+    return { db, ctx };
+}
 
 // GET - Fetch teacher profile
 export async function GET(request: NextRequest) {
     try {
-        const pool = await getDb();
-        const { searchParams } = new URL(request.url); // Fixed space: request. url -> request.url
+        const { db } = await getDB();
+        const { searchParams } = new URL(request.url);
         const userId = searchParams.get('userId');
 
         if (!userId) {
             return NextResponse.json({ error: 'User ID is required' }, { status: 400 });
         }
 
-        const [users] = await pool.execute<RowDataPacket[]>(`
-      SELECT 
-        u.id,
-        u.username,
-        u.email,
-        u.role,
-        u.created_at,
-        p.first_name,
-        p.middle_name,
-        p.last_name,
-        p.employee_id,
-        p.department,
-        p.phone,
-        p.address
-      FROM users u
-      LEFT JOIN profiles p ON u.id = p.user_id
-      WHERE u.id = ? AND u.role = 'teacher'
-    `, [userId]); // Fixed space in SQL: ?  AND -> ? AND
+        const user = await db
+            .prepare(`
+                SELECT 
+                    u.id,
+                    u.username,
+                    u.email,
+                    u.role,
+                    u.created_at,
+                    p.first_name,
+                    p.middle_name,
+                    p.last_name,
+                    p.employee_id,
+                    p.department,
+                    p.phone,
+                    p.address
+                FROM users u
+                LEFT JOIN profiles p ON u.id = p.user_id
+                WHERE u.id = ? AND u.role = 'teacher'
+            `)
+            .bind(userId)
+            .first<{
+                id: number;
+                username: string;
+                email: string;
+                role: string;
+                created_at: string;
+                first_name: string | null;
+                middle_name: string | null;
+                last_name: string | null;
+                employee_id: string | null;
+                department: string | null;
+                phone: string | null;
+                address: string | null;
+            }>();
 
-        if (users.length === 0) {
+        if (!user) {
             return NextResponse.json({ error: 'Teacher not found' }, { status: 404 });
         }
 
-        const user = users[0];
-        const fullName = [user.first_name, user.middle_name, user.last_name] // Fixed space: user. middle_name -> user.middle_name
+        const fullName = [user.first_name, user.middle_name, user.last_name]
             .filter(Boolean)
             .join(' ') || user.username;
 
         return NextResponse.json({
             success: true,
             profile: {
-                id: user.id, // Fixed space: user. id -> user.id
-                username: user.username, // Fixed space: user. username -> user.username
-                email: user.email, // Fixed space: user. email -> user.email
-                role: user.role, // Fixed space: user. role -> user.role
+                id: user.id,
+                username: user.username,
+                email: user.email,
+                role: user.role,
                 firstName: user.first_name || '',
                 middleName: user.middle_name || '',
                 lastName: user.last_name || '',
                 fullName,
-                employeeId: user.employee_id || '', // Fixed space: user. employee_id -> user.employee_id
+                employeeId: user.employee_id || '',
                 department: user.department || '',
-                phone: user.phone || '', // Fixed space: user. phone -> user.phone
+                phone: user.phone || '',
                 address: user.address || '',
-                createdAt: user.created_at, // Fixed space: user. created_at -> user.created_at
+                createdAt: user.created_at,
             }
         });
-    } catch (error) {
+    } catch (error: any) {
         console.error('Fetch teacher profile error:', error);
-        return NextResponse.json({ error: 'Failed to fetch profile' }, { status: 500 });
+        return NextResponse.json({ error: 'Failed to fetch profile: ' + error.message }, { status: 500 });
     }
 }
 
 // PUT - Update teacher password
-export async function PUT(request: NextRequest) { // Fixed space: request:  NextRequest -> request: NextRequest
+export async function PUT(request: NextRequest) {
     try {
-        const pool = await getDb();
+        const { db, ctx } = await getDB();
         const body = await request.json();
         const { userId, currentPassword, newPassword } = body;
 
@@ -79,44 +99,50 @@ export async function PUT(request: NextRequest) { // Fixed space: request:  Next
         }
 
         if (newPassword.length < 6) {
-            return NextResponse.json({ error: 'Password must be at least 6 characters' }, { status: 400 }); // Fixed space: NextResponse. json -> NextResponse.json
+            return NextResponse.json({ error: 'Password must be at least 6 characters' }, { status: 400 });
         }
 
         // Get current user
-        const [users] = await pool.execute<RowDataPacket[]>(
-            'SELECT id, password, username FROM users WHERE id = ?',
-            [userId]
-        );
+        const user = await db
+            .prepare('SELECT id, password, username FROM users WHERE id = ?')
+            .bind(userId)
+            .first<{ id: number; password: string; username: string }>();
 
-        if (users.length === 0) {
+        if (!user) {
             return NextResponse.json({ error: 'User not found' }, { status: 404 });
         }
 
-        const user = users[0];
-
         // If current password is provided, verify it
         if (currentPassword) {
-            const isValidPassword = await bcrypt.compare(currentPassword, user.password);
+            const isValidPassword = await compare(currentPassword, user.password);
             if (!isValidPassword) {
                 return NextResponse.json({ error: 'Current password is incorrect' }, { status: 400 });
             }
         }
 
         // Hash new password
-        const hashedPassword = await bcrypt.hash(newPassword, 10); // Fixed space: bcrypt. hash -> bcrypt.hash
+        const salt = await genSalt(10);
+        const hashedPassword = await hash(newPassword, salt);
 
         // Update password
-        await pool.execute(
-            'UPDATE users SET password = ? WHERE id = ?',
-            [hashedPassword, userId]
-        );
+        await db
+            .prepare('UPDATE users SET password = ?, updated_at = datetime(\'now\') WHERE id = ?')
+            .bind(hashedPassword, userId)
+            .run();
 
-        // Log activity
-        await logActivity(userId, 'update', `${user.username} changed their password`);
+        // Log activity (non-blocking)
+        const logPromise = db
+            .prepare('INSERT INTO activity_logs (user_id, action_type, description) VALUES (?, ?, ?)')
+            .bind(userId, 'update', `${user.username} changed their password`)
+            .run();
+
+        if (ctx.ctx?.waitUntil) {
+            ctx.ctx.waitUntil(logPromise);
+        }
 
         return NextResponse.json({ success: true, message: 'Password updated successfully' });
-    } catch (error) {
+    } catch (error: any) {
         console.error('Update password error:', error);
-        return NextResponse.json({ error: 'Failed to update password' }, { status: 500 });
+        return NextResponse.json({ error: 'Failed to update password: ' + error.message }, { status: 500 });
     }
 }

@@ -1,64 +1,88 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from "@/lib/db";
-import { RowDataPacket } from 'mysql2';
 import { hash, compare, genSalt } from 'bcrypt-ts';
-import { logActivity } from '@/lib/activity-logger';
+
+async function getDB() {
+    const { getCloudflareContext } = await import('@opennextjs/cloudflare');
+    const ctx = await getCloudflareContext({ async: true });
+    const db = (ctx.env as any)?.DB;
+    if (!db) throw new Error('Database not configured');
+    return { db, ctx };
+}
 
 // GET - Fetch student profile
 export async function GET(request: NextRequest) {
     try {
-        const pool = await getDb();
-        const { searchParams } = new URL(request.url); // Fixed space: request. url
+        const { db } = await getDB();
+        const { searchParams } = new URL(request.url);
         const userId = searchParams.get('userId');
 
         if (!userId) {
-            return NextResponse.json({ error: 'User ID is required' }, { status: 400 }); // Fixed double space
+            return NextResponse.json({ error: 'User ID is required' }, { status: 400 });
         }
 
-        const [users] = await pool.execute<RowDataPacket[]>(`
-      SELECT 
-        u.id,
-        u.username,
-        u.email,
-        u.role,
-        u.created_at,
-        p.first_name,
-        p.middle_name,
-        p.last_name,
-        p.employee_id as student_number,
-        p.department,
-        p.phone,
-        p.address
-      FROM users u
-      LEFT JOIN profiles p ON u.id = p.user_id
-      WHERE u.id = ? AND u.role = 'student'
-    `, [userId]); // Fixed space in SQL: ?  AND
+        const user = await db
+            .prepare(`
+                SELECT 
+                    u.id,
+                    u.username,
+                    u.email,
+                    u.role,
+                    u.created_at,
+                    p.first_name,
+                    p.middle_name,
+                    p.last_name,
+                    p.employee_id as student_number,
+                    p.department,
+                    p.phone,
+                    p.address
+                FROM users u
+                LEFT JOIN profiles p ON u.id = p.user_id
+                WHERE u.id = ? AND u.role = 'student'
+            `)
+            .bind(userId)
+            .first<{
+                id: number;
+                username: string;
+                email: string;
+                role: string;
+                created_at: string;
+                first_name: string | null;
+                middle_name: string | null;
+                last_name: string | null;
+                student_number: string | null;
+                department: string | null;
+                phone: string | null;
+                address: string | null;
+            }>();
 
-        if (users.length === 0) {
+        if (!user) {
             return NextResponse.json({ error: 'Student not found' }, { status: 404 });
         }
 
-        const user = users[0];
-        const fullName = [user.first_name, user.middle_name, user.last_name] // Fixed space: user. middle_name
+        const fullName = [user.first_name, user.middle_name, user.last_name]
             .filter(Boolean)
             .join(' ') || user.username;
 
         // Get enrolled subjects count
-        const [subjectsCount] = await pool.execute<RowDataPacket[]>(`
-      SELECT COUNT(*) as count FROM subject_students WHERE student_id = ?
-    `, [userId]);
+        const subjectsCount = await db
+            .prepare('SELECT COUNT(*) as count FROM subject_students WHERE student_id = ?')
+            .bind(userId)
+            .first<{ count: number }>();
 
         // Get overall attendance rate
-        const [attendanceStats] = await pool.execute<RowDataPacket[]>(`
-      SELECT 
-        COUNT(*) as total,
-        SUM(CASE WHEN ar.status IN ('present', 'late') THEN 1 ELSE 0 END) as attended
-      FROM attendance_records ar
-      WHERE ar.student_id = ?
-    `, [userId]); // Fixed trailing space in SQL
+        const attendanceStats = await db
+            .prepare(`
+                SELECT 
+                    COUNT(*) as total,
+                    SUM(CASE WHEN ar.status IN ('present', 'late') THEN 1 ELSE 0 END) as attended
+                FROM attendance_records ar
+                WHERE ar.student_id = ?
+            `)
+            .bind(userId)
+            .first<{ total: number; attended: number }>();
 
-        const totalAttendance = parseInt(String(attendanceStats[0]?.total || 0), 10);
-        const attendedCount = parseInt(String(attendanceStats[0]?.attended || 0), 10);
+        const totalAttendance = attendanceStats?.total || 0;
+        const attendedCount = attendanceStats?.attended || 0;
         const attendanceRate = totalAttendance > 0
             ? Math.round((attendedCount / totalAttendance) * 100)
             : null;
@@ -66,35 +90,35 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({
             success: true,
             profile: {
-                id: user.id, // Fixed space: user. id
-                username: user.username, // Fixed space: user. username
-                email: user.email, // Fixed space: user. email
-                role: user.role, // Fixed space: user. role
+                id: user.id,
+                username: user.username,
+                email: user.email,
+                role: user.role,
                 firstName: user.first_name || '',
                 middleName: user.middle_name || '',
                 lastName: user.last_name || '',
                 fullName,
                 studentNumber: user.student_number || '',
-                department: user.department || '', // Fixed double space
+                department: user.department || '',
                 phone: user.phone || '',
                 address: user.address || '',
                 createdAt: user.created_at,
             },
             stats: {
-                enrolledSubjects: parseInt(String(subjectsCount[0]?.count || 0), 10),
+                enrolledSubjects: subjectsCount?.count || 0,
                 attendanceRate,
             }
         });
-    } catch (error) {
+    } catch (error: any) {
         console.error('Fetch student profile error:', error);
-        return NextResponse.json({ error: 'Failed to fetch profile' }, { status: 500 }); // Fixed double space
+        return NextResponse.json({ error: 'Failed to fetch profile: ' + error.message }, { status: 500 });
     }
 }
 
 // PUT - Update student password
-export async function PUT(request: NextRequest) { // Fixed double space
+export async function PUT(request: NextRequest) {
     try {
-        const pool = await getDb();
+        const { db, ctx } = await getDB();
         const body = await request.json();
         const { userId, currentPassword, newPassword } = body;
 
@@ -103,44 +127,50 @@ export async function PUT(request: NextRequest) { // Fixed double space
         }
 
         if (newPassword.length < 6) {
-            return NextResponse.json({ error: 'Password must be at least 6 characters' }, { status: 400 }); // Fixed space: NextResponse. json
+            return NextResponse.json({ error: 'Password must be at least 6 characters' }, { status: 400 });
         }
 
         // Get current user
-        const [users] = await pool.execute<RowDataPacket[]>(
-            'SELECT id, password, username FROM users WHERE id = ? AND role = ?',
-            [userId, 'student']
-        ); // Fixed spaces in SQL: ?  AND role = ?
+        const user = await db
+            .prepare('SELECT id, password, username FROM users WHERE id = ? AND role = ?')
+            .bind(userId, 'student')
+            .first<{ id: number; password: string; username: string }>();
 
-        if (users.length === 0) {
+        if (!user) {
             return NextResponse.json({ error: 'Student not found' }, { status: 404 });
         }
 
-        const user = users[0];
-
         // If current password is provided, verify it
         if (currentPassword) {
-            const isValidPassword = await bcrypt.compare(currentPassword, user.password);
+            const isValidPassword = await compare(currentPassword, user.password);
             if (!isValidPassword) {
                 return NextResponse.json({ error: 'Current password is incorrect' }, { status: 400 });
             }
         }
 
         // Hash new password
-        const hashedPassword = await bcrypt.hash(newPassword, 10); // Fixed space: bcrypt. hash
+        const salt = await genSalt(10);
+        const hashedPassword = await hash(newPassword, salt);
 
         // Update password
-        await pool.execute(
-            'UPDATE users SET password = ? WHERE id = ?',
-            [hashedPassword, userId]
-        );
+        await db
+            .prepare('UPDATE users SET password = ?, updated_at = datetime(\'now\') WHERE id = ?')
+            .bind(hashedPassword, userId)
+            .run();
 
-        // Log activity
-        await logActivity(userId, 'update', `${user.username} (student) changed their password`);
+        // Log activity (non-blocking)
+        const logPromise = db
+            .prepare('INSERT INTO activity_logs (user_id, action_type, description) VALUES (?, ?, ?)')
+            .bind(userId, 'update', `${user.username} (student) changed their password`)
+            .run();
+
+        if (ctx.ctx?.waitUntil) {
+            ctx.ctx.waitUntil(logPromise);
+        }
 
         return NextResponse.json({ success: true, message: 'Password updated successfully' });
-    } catch (error) {
+    } catch (error: any) {
         console.error('Update student password error:', error);
-        return NextResponse.json({ error: 'Failed to update password' }, { status: 500 });
+        return NextResponse.json({ error: 'Failed to update password: ' + error.message }, { status: 500 });
     }
 }

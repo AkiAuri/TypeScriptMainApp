@@ -1,97 +1,107 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from "@/lib/db";
-import { RowDataPacket } from 'mysql2';
+
+async function getDB() {
+    const { getCloudflareContext } = await import('@opennextjs/cloudflare');
+    const ctx = await getCloudflareContext({ async: true });
+    const db = (ctx.env as any)?.DB;
+    if (!db) throw new Error('Database not configured');
+    return { db, ctx };
+}
 
 // GET - Fetch subjects enrolled by a student
 export async function GET(request: NextRequest) {
     try {
-        const pool = await getDb();
+        const { db } = await getDB();
         const { searchParams } = new URL(request.url);
         const studentId = searchParams.get('studentId');
         const semester = searchParams.get('semester');
-        const year = searchParams.get('year'); // Fixed space: searchParams. get -> searchParams.get
+        const year = searchParams.get('year');
 
         if (!studentId) {
             return NextResponse.json({ error: 'Student ID is required' }, { status: 400 });
         }
 
         // Build query with optional filters
-        let query = `
-      SELECT 
-        sub.id,
-        sub.name,
-        sub.code,
-        sec.id as section_id,
-        sec.name as section_name,
-        gl.id as grade_level_id,
-        gl.name as grade_level_name,
-        sem.id as semester_id,
-        sem.name as semester_name,
-        sy.id as school_year_id,
-        sy.year as school_year,
-        ss.enrolled_at,
-        (
-          SELECT GROUP_CONCAT(
-            CONCAT(
-              COALESCE(p.first_name, ''), ' ',
-              COALESCE(p.last_name, u.username)
-            )
-            SEPARATOR ', '
-          )
-          FROM subject_instructors si
-          JOIN users u ON si.instructor_id = u.id
-          LEFT JOIN profiles p ON u.id = p.user_id
-          WHERE si.subject_id = sub.id
-        ) as instructors,
-        (
-          SELECT COUNT(*) FROM subject_submissions 
-          WHERE subject_id = sub.id AND is_visible = 1
-        ) as total_submissions,
-        (
-          SELECT COUNT(*) FROM student_submissions stu_sub
-          JOIN subject_submissions sub_sub ON stu_sub.submission_id = sub_sub.id
-          WHERE sub_sub.subject_id = sub.id AND stu_sub.student_id = ss.student_id
-        ) as completed_submissions
-      FROM subject_students ss
-      JOIN subjects sub ON ss.subject_id = sub.id
-      JOIN sections sec ON sub.section_id = sec.id
-      JOIN grade_levels gl ON sec.grade_level_id = gl.id
-      JOIN semesters sem ON gl.semester_id = sem.id
-      JOIN school_years sy ON sem.school_year_id = sy.id
-      WHERE ss.student_id = ?
-    `;
+        // Note: SQLite doesn't have GROUP_CONCAT with SEPARATOR, uses group_concat with comma by default
+        let sql = `
+            SELECT
+                sub.id,
+                sub.name,
+                sub.code,
+                sec.id as section_id,
+                sec.name as section_name,
+                gl.id as grade_level_id,
+                gl.name as grade_level_name,
+                sem.id as semester_id,
+                sem.name as semester_name,
+                sy.id as school_year_id,
+                sy.year as school_year,
+                ss.enrolled_at,
+                (
+                    SELECT group_concat(
+                                   COALESCE(p.first_name || ' ', '') || COALESCE(p.last_name, u.username),
+                                   ', '
+                           )
+                    FROM subject_instructors si
+                             JOIN users u ON si.instructor_id = u.id
+                             LEFT JOIN profiles p ON u.id = p.user_id
+                    WHERE si.subject_id = sub.id
+                ) as instructors,
+                (
+                    SELECT COUNT(*) FROM subject_submissions
+                    WHERE subject_id = sub.id AND is_visible = 1
+                ) as total_submissions,
+                (
+                    SELECT COUNT(*) FROM student_submissions stu_sub
+                                             JOIN subject_submissions sub_sub ON stu_sub.submission_id = sub_sub.id
+                    WHERE sub_sub.subject_id = sub.id AND stu_sub.student_id = ss.student_id
+                ) as completed_submissions
+            FROM subject_students ss
+                     JOIN subjects sub ON ss.subject_id = sub.id
+                     JOIN sections sec ON sub.section_id = sec.id
+                     JOIN grade_levels gl ON sec.grade_level_id = gl.id
+                     JOIN semesters sem ON gl.semester_id = sem.id
+                     JOIN school_years sy ON sem.school_year_id = sy.id
+            WHERE ss.student_id = ?
+        `;
 
-        const params: any[] = [studentId]; // Fixed double space
+        const params: any[] = [studentId];
 
         if (semester && semester !== 'all') {
-            query += ` AND sem.name = ?`;
+            sql += ` AND sem.name = ?`;
             params.push(semester);
         }
 
         if (year && year !== 'all') {
-            query += ` AND sy.year = ?`;
+            sql += ` AND sy.year = ?`;
             params.push(year);
         }
 
-        query += ` ORDER BY sy.year DESC, sem.name, sub.name`;
+        sql += ` ORDER BY sy.year DESC, sem.name, sub.name`;
 
-        const [subjects] = await pool.execute<RowDataPacket[]>(query, params);
+        const stmt = db.prepare(sql);
+        const subjectsResult = params.length > 0
+            ? await stmt.bind(...params).all()
+            : await stmt.all();
 
         // Get unique semesters and years for filters
-        const [filterData] = await pool.execute<RowDataPacket[]>(`
-      SELECT DISTINCT sem.name as semester_name, sy.year as school_year
-      FROM subject_students ss
-      JOIN subjects sub ON ss.subject_id = sub.id
-      JOIN sections sec ON sub.section_id = sec.id
-      JOIN grade_levels gl ON sec.grade_level_id = gl.id
-      JOIN semesters sem ON gl.semester_id = sem.id
-      JOIN school_years sy ON sem.school_year_id = sy.id
-      WHERE ss.student_id = ?
-      ORDER BY sy.year DESC, sem.name
-    `, [studentId]); // Fixed spaces in SQL: sec. id -> sec.id and sy. year -> sy.year
+        const filterResult = await db
+            .prepare(`
+                SELECT DISTINCT sem.name as semester_name, sy.year as school_year
+                FROM subject_students ss
+                JOIN subjects sub ON ss.subject_id = sub.id
+                JOIN sections sec ON sub.section_id = sec.id
+                JOIN grade_levels gl ON sec.grade_level_id = gl.id
+                JOIN semesters sem ON gl.semester_id = sem.id
+                JOIN school_years sy ON sem.school_year_id = sy.id
+                WHERE ss.student_id = ?
+                ORDER BY sy.year DESC, sem.name
+            `)
+            .bind(studentId)
+            .all();
 
-        const semesters = [...new Set(filterData.map((f) => f.semester_name))]; // Fixed space: ... new -> ...new
-        const years = [...new Set(filterData.map((f) => f.school_year))];
+        const semesters = [...new Set(filterResult.results.map((f: any) => f.semester_name))];
+        const years = [...new Set(filterResult.results.map((f: any) => f.school_year))];
 
         // Color palette for subjects
         const colors = [
@@ -105,9 +115,9 @@ export async function GET(request: NextRequest) {
             "from-indigo-500 to-indigo-600",
         ];
 
-        const mappedSubjects = subjects.map((subject, index) => {
-            const totalSubmissions = parseInt(String(subject.total_submissions || 0), 10);
-            const completedSubmissions = parseInt(String(subject.completed_submissions || 0), 10);
+        const mappedSubjects = subjectsResult.results.map((subject: any, index: number) => {
+            const totalSubmissions = subject.total_submissions || 0;
+            const completedSubmissions = subject.completed_submissions || 0;
             const progress = totalSubmissions > 0
                 ? Math.round((completedSubmissions / totalSubmissions) * 100)
                 : 0;
@@ -121,9 +131,9 @@ export async function GET(request: NextRequest) {
                 gradeLevelId: subject.grade_level_id,
                 gradeLevelName: subject.grade_level_name,
                 semesterId: subject.semester_id,
-                semesterName: subject.semester_name, // Fixed space: subject. semester_name -> subject.semester_name
+                semesterName: subject.semester_name,
                 schoolYearId: subject.school_year_id,
-                schoolYear: subject.school_year, // Fixed double space
+                schoolYear: subject.school_year,
                 instructors: subject.instructors || 'No instructor assigned',
                 enrolledAt: subject.enrolled_at,
                 totalSubmissions,
@@ -141,8 +151,8 @@ export async function GET(request: NextRequest) {
                 years,
             },
         });
-    } catch (error) {
+    } catch (error: any) {
         console.error('Fetch student subjects error:', error);
-        return NextResponse.json({ error: 'Failed to fetch subjects' }, { status: 500 });
+        return NextResponse.json({ error: 'Failed to fetch subjects: ' + error.message }, { status: 500 });
     }
 }

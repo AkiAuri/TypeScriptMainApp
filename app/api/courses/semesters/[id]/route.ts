@@ -1,75 +1,119 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from "@/lib/db";
-import { RowDataPacket } from 'mysql2';
-import { logActivity, getAdminIdFromRequest } from '@/lib/activity-logger';
+
+async function getDB() {
+    const { getCloudflareContext } = await import('@opennextjs/cloudflare');
+    const ctx = await getCloudflareContext({ async: true });
+    const db = (ctx.env as any)?.DB;
+    if (!db) throw new Error('Database not configured');
+    return { db, ctx };
+}
+
+// GET - Fetch single semester
+export async function GET(
+    request: NextRequest,
+    { params }: { params: Promise<{ id: string }> }
+) {
+    try {
+        const { db } = await getDB();
+        const { id } = await params;
+
+        const semester = await db
+            .prepare('SELECT id, name, school_year_id, created_at FROM semesters WHERE id = ?')
+            .bind(id)
+            .first();
+
+        if (!semester) {
+            return NextResponse.json({ error: 'Semester not found' }, { status: 404 });
+        }
+
+        return NextResponse.json({ success: true, data: semester });
+    } catch (error: any) {
+        console.error('Fetch semester error:', error);
+        return NextResponse.json({ error: 'Failed to fetch semester: ' + error.message }, { status: 500 });
+    }
+}
 
 // PUT - Update semester
 export async function PUT(
-    request:  NextRequest,
-    { params }: { params: { id: string } }
+    request: NextRequest,
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
-        const pool = await getDb();
-        const adminId = getAdminIdFromRequest(request);
+        const { db, ctx } = await getDB();
         const { name } = await request.json();
-        const { id } = params;
+        const { id } = await params;
 
         // Get old name for logging
-        const [oldData] = await pool.execute<RowDataPacket[]>(
-            'SELECT name FROM semesters WHERE id = ?',
-            [id]
-        );
-        const oldName = oldData[0]?.name;
+        const oldData = await db
+            .prepare('SELECT name FROM semesters WHERE id = ?')
+            .bind(id)
+            .first<{ name: string }>();
 
-        await pool.execute('UPDATE semesters SET name = ? WHERE id = ? ', [name, id]);
+        const oldName = oldData?.name;
 
-        // ✅ Log activity
-        await logActivity(
-            adminId,
-            'update',
-            `Updated semester:  "${oldName}" to "${name}"`
-        );
+        await db
+            .prepare('UPDATE semesters SET name = ?, updated_at = datetime(\'now\') WHERE id = ?')
+            .bind(name, id)
+            .run();
+
+        // Log activity (non-blocking)
+        const logPromise = db
+            .prepare('INSERT INTO activity_logs (user_id, action_type, description) VALUES (?, ?, ?)')
+            .bind(null, 'update', `Updated semester: "${oldName}" to "${name}"`)
+            .run();
+
+        if (ctx.ctx?.waitUntil) {
+            ctx.ctx.waitUntil(logPromise);
+        }
 
         return NextResponse.json({ success: true });
-    } catch (error) {
+    } catch (error: any) {
         console.error('Update semester error:', error);
-        return NextResponse.json({ error: 'Failed to update semester' }, { status: 500 });
+        return NextResponse.json({ error: 'Failed to update semester: ' + error.message }, { status: 500 });
     }
 }
 
 // DELETE - Delete semester
 export async function DELETE(
     request: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
-        const pool = await getDb();
-        const adminId = getAdminIdFromRequest(request);
-        const { id } = params;
+        const { db, ctx } = await getDB();
+        const { id } = await params;
 
         // Get semester info for logging
-        const [data] = await pool.execute<RowDataPacket[]>(
-            `SELECT s.name, sy.year as school_year 
-            FROM semesters s 
-            LEFT JOIN school_years sy ON s.school_year_id = sy.id 
-            WHERE s.id = ?`,
-            [id]
-        );
-        const semesterName = data[0]?. name;
-        const schoolYear = data[0]?.school_year;
+        const data = await db
+            .prepare(`
+                SELECT s.name, sy.year as school_year 
+                FROM semesters s 
+                LEFT JOIN school_years sy ON s.school_year_id = sy.id 
+                WHERE s.id = ? 
+            `)
+            .bind(id)
+            .first<{ name: string; school_year: string }>();
 
-        await pool.execute('DELETE FROM semesters WHERE id = ?', [id]);
+        const semesterName = data?.name;
+        const schoolYear = data?.school_year;
 
-        // ✅ Log activity
-        await logActivity(
-            adminId,
-            'delete',
-            `Deleted semester: ${semesterName}${schoolYear ? ` from ${schoolYear}` : ''}`
-        );
+        await db
+            .prepare('DELETE FROM semesters WHERE id = ?')
+            .bind(id)
+            .run();
+
+        // Log activity (non-blocking)
+        const logPromise = db
+            .prepare('INSERT INTO activity_logs (user_id, action_type, description) VALUES (?, ?, ?)')
+            .bind(null, 'delete', `Deleted semester: ${semesterName}${schoolYear ? ` from ${schoolYear}` : ''}`)
+            .run();
+
+        if (ctx.ctx?.waitUntil) {
+            ctx.ctx.waitUntil(logPromise);
+        }
 
         return NextResponse.json({ success: true });
-    } catch (error) {
+    } catch (error: any) {
         console.error('Delete semester error:', error);
-        return NextResponse.json({ error: 'Failed to delete semester' }, { status: 500 });
+        return NextResponse.json({ error: 'Failed to delete semester: ' + error.message }, { status: 500 });
     }
 }

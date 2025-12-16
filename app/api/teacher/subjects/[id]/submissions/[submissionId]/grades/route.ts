@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from "@/lib/db";
-import { RowDataPacket, ResultSetHeader } from 'mysql2';
-import { logActivity, getAdminIdFromRequest } from '@/lib/activity-logger';
+
+async function getDB() {
+    const { getCloudflareContext } = await import('@opennextjs/cloudflare');
+    const ctx = await getCloudflareContext({ async: true });
+    const db = (ctx.env as any)?.DB;
+    if (!db) throw new Error('Database not configured');
+    return { db, ctx };
+}
 
 // GET - Fetch student submissions for grading
 export async function GET(
@@ -9,51 +14,57 @@ export async function GET(
     { params }: { params: Promise<{ id: string; submissionId: string }> }
 ) {
     try {
-        const pool = await getDb();
+        const { db } = await getDB();
         const { id: subjectId, submissionId } = await params;
 
         // Get submission details
-        const [submissions] = await pool.execute<RowDataPacket[]>(`
-      SELECT 
-        ss.id,
-        ss.name,
-        ss.description,
-        ss.due_date,
-        ss.due_time,
-        ss.max_attempts
-      FROM subject_submissions ss
-      WHERE ss.id = ? AND ss.subject_id = ?
-    `, [submissionId, subjectId]);
+        const submission = await db
+            .prepare(`
+                SELECT 
+                    ss.id,
+                    ss.name,
+                    ss.description,
+                    ss.due_date,
+                    ss.due_time,
+                    ss.max_attempts
+                FROM subject_submissions ss
+                WHERE ss.id = ? AND ss.subject_id = ?
+            `)
+            .bind(submissionId, subjectId)
+            .first();
 
-        if (submissions.length === 0) {
+        if (!submission) {
             return NextResponse.json({ error: 'Submission not found' }, { status: 404 });
         }
 
-        // Get all students enrolled in this subject with their submission status
-        const [students] = await pool.execute<RowDataPacket[]>(`
-      SELECT 
-        u.id,
-        u.username,
-        u.email,
-        p.first_name,
-        p.middle_name,
-        p.last_name,
-        p.employee_id as student_number,
-        sts.id as student_submission_id,
-        sts.attempt_number,
-        sts.submitted_at,
-        sts.grade,
-        sts.feedback,
-        sts.graded_at
-      FROM subject_students ss
-      JOIN users u ON ss.student_id = u.id
-      LEFT JOIN profiles p ON u.id = p.user_id
-      LEFT JOIN student_submissions sts ON sts.submission_id = ? AND sts.student_id = u.id
-      WHERE ss.subject_id = ?
-      ORDER BY p.last_name, p.first_name, u.username
-    `, [submissionId, subjectId]);
+        // Get all students enrolled with their submission status
+        const studentsResult = await db
+            .prepare(`
+                SELECT 
+                    u.id,
+                    u.username,
+                    u.email,
+                    p.first_name,
+                    p.middle_name,
+                    p.last_name,
+                    p.employee_id as student_number,
+                    sts.id as student_submission_id,
+                    sts.attempt_number,
+                    sts.submitted_at,
+                    sts.grade,
+                    sts.feedback,
+                    sts.graded_at
+                FROM subject_students ss
+                JOIN users u ON ss.student_id = u.id
+                LEFT JOIN profiles p ON u.id = p.user_id
+                LEFT JOIN student_submissions sts ON sts.submission_id = ? AND sts.student_id = u.id
+                WHERE ss.subject_id = ?
+                ORDER BY p.last_name, p.first_name, u.username
+            `)
+            .bind(submissionId, subjectId)
+            .all();
 
-        const mappedStudents = students.map(student => ({
+        const mappedStudents = studentsResult.results.map((student: any) => ({
             id: student.id,
             name: [student.first_name, student.middle_name, student.last_name]
                 .filter(Boolean)
@@ -67,20 +78,18 @@ export async function GET(
             feedback: student.feedback,
             gradedAt: student.graded_at,
             status: student.student_submission_id
-                ? student.grade !== null
-                    ? 'graded'
-                    : 'submitted'
+                ? (student.grade !== null ? 'graded' : 'submitted')
                 : 'not_submitted'
         }));
 
         return NextResponse.json({
             success: true,
-            submission: submissions[0],
+            submission,
             students: mappedStudents
         });
-    } catch (error) {
+    } catch (error: any) {
         console.error('Fetch grades error:', error);
-        return NextResponse.json({ error: 'Failed to fetch grades' }, { status: 500 });
+        return NextResponse.json({ error: 'Failed to fetch grades: ' + error.message }, { status: 500 });
     }
 }
 
@@ -90,11 +99,9 @@ export async function POST(
     { params }: { params: Promise<{ id: string; submissionId: string }> }
 ) {
     try {
-        const pool = await getDb();
+        const { db } = await getDB();
         const { submissionId } = await params;
-        const teacherId = getAdminIdFromRequest(request);
         const body = await request.json();
-
         const { studentId, grade, feedback } = body;
 
         if (!studentId) {
@@ -105,37 +112,39 @@ export async function POST(
             return NextResponse.json({ error: 'Grade is required' }, { status: 400 });
         }
 
-        // Check if student has submitted
-        const [existing] = await pool.execute<RowDataPacket[]>(
-            'SELECT id FROM student_submissions WHERE submission_id = ? AND student_id = ?',
-            [submissionId, studentId]
-        );
+        const existing = await db
+            .prepare('SELECT id FROM student_submissions WHERE submission_id = ? AND student_id = ?')
+            .bind(submissionId, studentId)
+            .first();
 
-        if (existing.length === 0) {
-            // Create a submission record for the student (for manual grading without student submission)
-            const [result] = await pool.execute<ResultSetHeader>(
-                `INSERT INTO student_submissions (submission_id, student_id, attempt_number, grade, feedback, graded_at, graded_by)
-         VALUES (?, ?, 1, ?, ?, NOW(), ?)`,
-                [submissionId, studentId, grade, feedback || null, teacherId]
-            );
+        if (!existing) {
+            const result = await db
+                .prepare(`
+                    INSERT INTO student_submissions (submission_id, student_id, attempt_number, grade, feedback, graded_at)
+                    VALUES (?, ?, 1, ?, ?, datetime('now'))
+                `)
+                .bind(submissionId, studentId, grade, feedback || null)
+                .run();
 
             return NextResponse.json({
                 success: true,
-                studentSubmissionId: result.insertId
+                studentSubmissionId: result.meta.last_row_id
             });
         } else {
-            // Update existing submission
-            await pool.execute(
-                `UPDATE student_submissions SET grade = ?, feedback = ?, graded_at = NOW(), graded_by = ?
-         WHERE submission_id = ? AND student_id = ?`,
-                [grade, feedback || null, teacherId, submissionId, studentId]
-            );
+            await db
+                .prepare(`
+                    UPDATE student_submissions 
+                    SET grade = ?, feedback = ?, graded_at = datetime('now')
+                    WHERE submission_id = ? AND student_id = ?
+                `)
+                .bind(grade, feedback || null, submissionId, studentId)
+                .run();
 
             return NextResponse.json({ success: true });
         }
-    } catch (error) {
+    } catch (error: any) {
         console.error('Submit grade error:', error);
-        return NextResponse.json({ error: 'Failed to submit grade' }, { status: 500 });
+        return NextResponse.json({ error: 'Failed to submit grade: ' + error.message }, { status: 500 });
     }
 }
 
@@ -145,12 +154,10 @@ export async function PUT(
     { params }: { params: Promise<{ id: string; submissionId: string }> }
 ) {
     try {
-        const pool = await getDb();
+        const { db, ctx } = await getDB();
         const { submissionId } = await params;
-        const teacherId = getAdminIdFromRequest(request);
         const body = await request.json();
-
-        const { grades } = body; // Array of { studentId, grade, feedback }
+        const { grades } = body;
 
         if (!grades || !Array.isArray(grades)) {
             return NextResponse.json({ error: 'Grades array is required' }, { status: 400 });
@@ -158,45 +165,50 @@ export async function PUT(
 
         for (const gradeData of grades) {
             const { studentId, grade, feedback } = gradeData;
-
             if (grade === undefined || grade === null) continue;
 
-            // Check if student has submitted
-            const [existing] = await pool.execute<RowDataPacket[]>(
-                'SELECT id FROM student_submissions WHERE submission_id = ? AND student_id = ?',
-                [submissionId, studentId]
-            );
+            const existing = await db
+                .prepare('SELECT id FROM student_submissions WHERE submission_id = ? AND student_id = ?')
+                .bind(submissionId, studentId)
+                .first();
 
-            if (existing.length === 0) {
-                await pool.execute(
-                    `INSERT INTO student_submissions (submission_id, student_id, attempt_number, grade, feedback, graded_at, graded_by)
-           VALUES (?, ?, 1, ?, ?, NOW(), ?)`,
-                    [submissionId, studentId, grade, feedback || null, teacherId]
-                );
+            if (!existing) {
+                await db
+                    .prepare(`
+                        INSERT INTO student_submissions (submission_id, student_id, attempt_number, grade, feedback, graded_at)
+                        VALUES (?, ?, 1, ?, ?, datetime('now'))
+                    `)
+                    .bind(submissionId, studentId, grade, feedback || null)
+                    .run();
             } else {
-                await pool.execute(
-                    `UPDATE student_submissions SET grade = ?, feedback = ?, graded_at = NOW(), graded_by = ?
-           WHERE submission_id = ? AND student_id = ?`,
-                    [grade, feedback || null, teacherId, submissionId, studentId]
-                );
+                await db
+                    .prepare(`
+                        UPDATE student_submissions 
+                        SET grade = ?, feedback = ?, graded_at = datetime('now')
+                        WHERE submission_id = ? AND student_id = ?
+                    `)
+                    .bind(grade, feedback || null, submissionId, studentId)
+                    .run();
             }
         }
 
-        // Get submission name for logging
-        const [submission] = await pool.execute<RowDataPacket[]>(
-            'SELECT name FROM subject_submissions WHERE id = ?',
-            [submissionId]
-        );
+        const submission = await db
+            .prepare('SELECT name FROM subject_submissions WHERE id = ?')
+            .bind(submissionId)
+            .first<{ name: string }>();
 
-        await logActivity(
-            teacherId,
-            'update',
-            `Updated grades for ${grades.length} students in "${submission[0]?.name}"`
-        );
+        const logPromise = db
+            .prepare('INSERT INTO activity_logs (user_id, action_type, description) VALUES (?, ?, ?)')
+            .bind(null, 'update', `Updated grades for ${grades.length} students in "${submission?.name}"`)
+            .run();
+
+        if (ctx.ctx?.waitUntil) {
+            ctx.ctx.waitUntil(logPromise);
+        }
 
         return NextResponse.json({ success: true });
-    } catch (error) {
+    } catch (error: any) {
         console.error('Bulk update grades error:', error);
-        return NextResponse.json({ error: 'Failed to update grades' }, { status: 500 });
+        return NextResponse.json({ error: 'Failed to update grades: ' + error.message }, { status: 500 });
     }
 }

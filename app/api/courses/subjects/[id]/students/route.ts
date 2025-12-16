@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from "@/lib/db";
-import { RowDataPacket } from 'mysql2';
-import { logActivity, getAdminIdFromRequest } from '@/lib/activity-logger';
+
+async function getDB() {
+    const { getCloudflareContext } = await import('@opennextjs/cloudflare');
+    const ctx = await getCloudflareContext({ async: true });
+    const db = (ctx.env as any)?.DB;
+    if (!db) throw new Error('Database not configured');
+    return { db, ctx };
+}
 
 // GET - Fetch students for a subject
 export async function GET(
@@ -9,79 +14,101 @@ export async function GET(
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
-        const pool = await getDb();
+        const { db } = await getDB();
         const { id } = await params;
 
-        const [assigned] = await pool.execute<RowDataPacket[]>(`
-            SELECT
-                u.id,
-                u.username,
-                u.email,
-                p.first_name,
-                p.middle_name,
-                p.last_name,
-                p.department,
-                p.employee_id as student_number
-            FROM subject_students ss
-                     JOIN users u ON ss.student_id = u.id
-                     LEFT JOIN profiles p ON u. id = p.user_id
-            WHERE ss.subject_id = ? AND u.role = 'student'
-        `, [id]);
+        const result = await db
+            .prepare(`
+                SELECT
+                    u.id,
+                    u.username,
+                    u.email,
+                    p.first_name,
+                    p.middle_name,
+                    p.last_name,
+                    p.department,
+                    p.employee_id as student_number
+                FROM subject_students ss
+                JOIN users u ON ss.student_id = u.id
+                LEFT JOIN profiles p ON u.id = p.user_id
+                WHERE ss.subject_id = ? AND u.role = 'student'
+            `)
+            .bind(id)
+            .all();
 
-        return NextResponse.json({ success: true, data: assigned });
-    } catch (error) {
+        return NextResponse.json({ success: true, data: result.results });
+    } catch (error: any) {
         console.error('Fetch subject students error:', error);
-        return NextResponse.json({ error: 'Failed to fetch students' }, { status: 500 });
+        return NextResponse.json({ error: 'Failed to fetch students: ' + error.message }, { status: 500 });
     }
 }
 
 // POST - Assign student to subject
 export async function POST(
-    request:  NextRequest,
-    { params }: { params: { id: string } }
+    request: NextRequest,
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
-        const pool = await getDb();
-        const adminId = getAdminIdFromRequest(request);
-        const { id } = params;
+        const { db, ctx } = await getDB();
+        const { id } = await params;
         const { studentId } = await request.json();
 
-        // Get student and subject names for logging
-        const [student] = await pool.execute<RowDataPacket[]>(
-            `SELECT u.username, p.first_name, p.last_name 
-            FROM users u 
-            LEFT JOIN profiles p ON u.id = p.user_id 
-            WHERE u.id = ?`,
-            [studentId]
-        );
-        const [subject] = await pool.execute<RowDataPacket[]>(
-            'SELECT name FROM subjects WHERE id = ?',
-            [id]
-        );
+        // Get student name for logging
+        const student = await db
+            .prepare(`
+                SELECT u.username, p.first_name, p.last_name 
+                FROM users u 
+                LEFT JOIN profiles p ON u.id = p.user_id 
+                WHERE u.id = ? 
+            `)
+            .bind(studentId)
+            .first<{ username: string; first_name: string; last_name: string }>();
 
-        const studentName = [student[0]?.first_name, student[0]?.last_name]
-            .filter(Boolean).join(' ') || student[0]?.username || 'Unknown';
-        const subjectName = subject[0]?.name || 'Unknown';
+        // Get subject name for logging
+        const subject = await db
+            .prepare('SELECT name FROM subjects WHERE id = ?')
+            .bind(id)
+            .first<{ name: string }>();
 
-        await pool.execute(
-            'INSERT INTO subject_students (subject_id, student_id) VALUES (?, ?)',
-            [id, studentId]
-        );
+        const studentName = [student?.first_name, student?.last_name]
+            .filter(Boolean).join(' ') || student?.username || 'Unknown';
+        const subjectName = subject?.name || 'Unknown';
 
-        // ✅ Log activity
-        await logActivity(
-            adminId,
-            'create',
-            `Enrolled student ${studentName} in ${subjectName}`
-        );
+        // Check if already assigned
+        const existing = await db
+            .prepare('SELECT id FROM subject_students WHERE subject_id = ? AND student_id = ?')
+            .bind(id, studentId)
+            .first();
+
+        if (existing) {
+            return NextResponse.json({ error: 'Student already enrolled' }, { status: 400 });
+        }
+
+        await db
+            .prepare('INSERT INTO subject_students (subject_id, student_id, enrolled_at) VALUES (?, ?, datetime(\'now\'))')
+            .bind(id, studentId)
+            .run();
+
+        // Log activity (non-blocking)
+        const logPromise = db
+            .prepare('INSERT INTO activity_logs (user_id, action_type, description) VALUES (?, ?, ?)')
+            .bind(null, 'create', `Enrolled student ${studentName} in ${subjectName}`)
+            .run();
+
+        if (ctx.ctx?.waitUntil) {
+            ctx.ctx.waitUntil(logPromise);
+        }
 
         return NextResponse.json({ success: true });
     } catch (error: any) {
-        if (error.code === 'ER_DUP_ENTRY') {
-            return NextResponse.json({ error: 'Student already assigned' }, { status: 400 });
+        console.error('Assign student error:', error);
+
+        // Check for unique constraint violation
+        if (error.message?.includes('UNIQUE constraint failed')) {
+            return NextResponse.json({ error: 'Student already enrolled' }, { status: 400 });
         }
-        console. error('Assign student error:', error);
-        return NextResponse.json({ error: 'Failed to assign student' }, { status: 500 });
+
+        return NextResponse.json({ error: 'Failed to assign student: ' + error.message }, { status: 500 });
     }
 }
 
@@ -91,44 +118,54 @@ export async function DELETE(
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
-        const pool = await getDb();
-        const adminId = getAdminIdFromRequest(request);
+        const { db, ctx } = await getDB();
         const { id } = await params;
         const { searchParams } = new URL(request.url);
         const studentId = searchParams.get('studentId');
 
-        // Get student and subject names for logging
-        const [student] = await pool.execute<RowDataPacket[]>(
-            `SELECT u.username, p.first_name, p.last_name 
-            FROM users u 
-            LEFT JOIN profiles p ON u.id = p.user_id 
-            WHERE u.id = ?`,
-            [studentId]
-        );
-        const [subject] = await pool.execute<RowDataPacket[]>(
-            'SELECT name FROM subjects WHERE id = ?',
-            [id]
-        );
+        if (!studentId) {
+            return NextResponse.json({ error: 'Student ID is required' }, { status: 400 });
+        }
 
-        const studentName = [student[0]?.first_name, student[0]?.last_name]
-            .filter(Boolean).join(' ') || student[0]?.username || 'Unknown';
-        const subjectName = subject[0]?.name || 'Unknown';
+        // Get student name for logging
+        const student = await db
+            .prepare(`
+                SELECT u.username, p.first_name, p.last_name 
+                FROM users u 
+                LEFT JOIN profiles p ON u.id = p.user_id 
+                WHERE u.id = ?
+            `)
+            .bind(studentId)
+            .first<{ username: string; first_name: string; last_name: string }>();
 
-        await pool.execute(
-            'DELETE FROM subject_students WHERE subject_id = ? AND student_id = ?',
-            [id, studentId]
-        );
+        // Get subject name for logging
+        const subject = await db
+            .prepare('SELECT name FROM subjects WHERE id = ?')
+            .bind(id)
+            .first<{ name: string }>();
 
-        // ✅ Log activity
-        await logActivity(
-            adminId,
-            'delete',
-            `Removed student ${studentName} from ${subjectName}`
-        );
+        const studentName = [student?.first_name, student?.last_name]
+            .filter(Boolean).join(' ') || student?.username || 'Unknown';
+        const subjectName = subject?.name || 'Unknown';
+
+        await db
+            .prepare('DELETE FROM subject_students WHERE subject_id = ? AND student_id = ?')
+            .bind(id, studentId)
+            .run();
+
+        // Log activity (non-blocking)
+        const logPromise = db
+            .prepare('INSERT INTO activity_logs (user_id, action_type, description) VALUES (?, ?, ?)')
+            .bind(null, 'delete', `Removed student ${studentName} from ${subjectName}`)
+            .run();
+
+        if (ctx.ctx?.waitUntil) {
+            ctx.ctx.waitUntil(logPromise);
+        }
 
         return NextResponse.json({ success: true });
-    } catch (error) {
+    } catch (error: any) {
         console.error('Remove student error:', error);
-        return NextResponse.json({ error: 'Failed to remove student' }, { status: 500 });
+        return NextResponse.json({ error: 'Failed to remove student: ' + error.message }, { status: 500 });
     }
 }

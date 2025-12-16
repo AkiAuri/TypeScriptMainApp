@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from "@/lib/db";
-import { RowDataPacket, ResultSetHeader } from 'mysql2';
-import { logActivity, getAdminIdFromRequest } from '@/lib/activity-logger';
+
+async function getDB() {
+    const { getCloudflareContext } = await import('@opennextjs/cloudflare');
+    const ctx = await getCloudflareContext({ async: true });
+    const db = (ctx.env as any)?.DB;
+    if (!db) throw new Error('Database not configured');
+    return { db, ctx };
+}
 
 // GET - Fetch attendance sessions for a subject
 export async function GET(
@@ -9,27 +14,30 @@ export async function GET(
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
-        const pool = await getDb();
-        const subjectId = (await params).id;
+        const { db } = await getDB();
+        const { id: subjectId } = await params;
 
-        const [sessions] = await pool.execute<RowDataPacket[]>(`
-      SELECT 
-        a.id,
-        a.session_date,
-        a.session_time,
-        a.is_visible,
-        a.created_at,
-        (SELECT COUNT(*) FROM attendance_records ar WHERE ar.session_id = a.id) as total_students,
-        (SELECT COUNT(*) FROM attendance_records ar WHERE ar.session_id = a.id AND ar.status = 'present') as present_count,
-        (SELECT COUNT(*) FROM attendance_records ar WHERE ar.session_id = a.id AND ar.status = 'absent') as absent_count,
-        (SELECT COUNT(*) FROM attendance_records ar WHERE ar.session_id = a.id AND ar.status = 'late') as late_count
-      FROM attendance_sessions a
-      WHERE a.subject_id = ?
-      ORDER BY a.session_date DESC, a.session_time DESC
-    `, [subjectId]);
+        const sessionsResult = await db
+            .prepare(`
+                SELECT 
+                    a.id,
+                    a.session_date,
+                    a.session_time,
+                    a.is_visible,
+                    a.created_at,
+                    (SELECT COUNT(*) FROM attendance_records ar WHERE ar.session_id = a.id) as total_students,
+                    (SELECT COUNT(*) FROM attendance_records ar WHERE ar.session_id = a.id AND ar.status = 'present') as present_count,
+                    (SELECT COUNT(*) FROM attendance_records ar WHERE ar.session_id = a.id AND ar.status = 'absent') as absent_count,
+                    (SELECT COUNT(*) FROM attendance_records ar WHERE ar.session_id = a.id AND ar.status = 'late') as late_count
+                FROM attendance_sessions a
+                WHERE a.subject_id = ?
+                ORDER BY a.session_date DESC, a.session_time DESC
+            `)
+            .bind(subjectId)
+            .all();
 
-        const mappedSessions = sessions.map(session => ({
-            id: session.id, // Fixed double space
+        const mappedSessions = sessionsResult.results.map((session: any) => ({
+            id: session.id,
             date: session.session_date,
             time: session.session_time,
             visible: session.is_visible === 1,
@@ -40,9 +48,9 @@ export async function GET(
         }));
 
         return NextResponse.json({ success: true, sessions: mappedSessions });
-    } catch (error) {
+    } catch (error: any) {
         console.error('Fetch attendance sessions error:', error);
-        return NextResponse.json({ error: 'Failed to fetch attendance sessions' }, { status: 500 });
+        return NextResponse.json({ error: 'Failed to fetch attendance sessions: ' + error.message }, { status: 500 });
     }
 }
 
@@ -52,11 +60,9 @@ export async function POST(
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
-        const pool = await getDb();
-        const subjectId = (await params).id;
-        const teacherId = getAdminIdFromRequest(request);
+        const { db, ctx } = await getDB();
+        const { id: subjectId } = await params;
         const body = await request.json();
-
         const { date, time, isVisible, students } = body;
 
         if (!date) {
@@ -64,39 +70,47 @@ export async function POST(
         }
 
         // Create session
-        const [result] = await pool.execute<ResultSetHeader>(
-            'INSERT INTO attendance_sessions (subject_id, session_date, session_time, is_visible) VALUES (?, ?, ?, ?)',
-            [subjectId, date, time || null, isVisible ? 1 : 0]
-        );
+        const result = await db
+            .prepare('INSERT INTO attendance_sessions (subject_id, session_date, session_time, is_visible, created_at) VALUES (?, ?, ?, ?, datetime(\'now\'))')
+            .bind(subjectId, date, time || null, isVisible ? 1 : 0)
+            .run();
 
-        const sessionId = result.insertId;
+        const sessionId = result.meta.last_row_id;
 
         // Insert attendance records for each student
         if (students && students.length > 0) {
             for (const student of students) {
-                await pool.execute(
-                    'INSERT INTO attendance_records (session_id, student_id, status) VALUES (?, ?, ?)',
-                    [sessionId, student.id, student.status || 'absent']
-                );
+                await db
+                    .prepare('INSERT INTO attendance_records (session_id, student_id, status) VALUES (?, ?, ?)')
+                    .bind(sessionId, student.id, student.status || 'absent')
+                    .run();
             }
         }
 
-        await logActivity(teacherId, 'create', `Created attendance session for ${date}`);
+        // Log activity (non-blocking)
+        const logPromise = db
+            .prepare('INSERT INTO activity_logs (user_id, action_type, description) VALUES (?, ?, ?)')
+            .bind(null, 'create', `Created attendance session for ${date}`)
+            .run();
+
+        if (ctx.ctx?.waitUntil) {
+            ctx.ctx.waitUntil(logPromise);
+        }
 
         return NextResponse.json({
             success: true,
             session: {
-                id: sessionId, // Fixed double space
+                id: sessionId,
                 date,
                 time,
                 visible: isVisible,
-                participants: students?.length || 0, // Fixed double space & optional chaining space
-                present: students?.filter((s: any) => s.status === 'present').length || 0, // Fixed double space
-                absent: students?.filter((s: any) => s.status === 'absent').length || 0 // Fixed optional chaining space
+                participants: students?.length || 0,
+                present: students?.filter((s: any) => s.status === 'present').length || 0,
+                absent: students?.filter((s: any) => s.status === 'absent').length || 0
             }
         });
-    } catch (error) {
+    } catch (error: any) {
         console.error('Create attendance session error:', error);
-        return NextResponse.json({ error: 'Failed to create attendance session' }, { status: 500 }); // Fixed NextResponse space & double space
+        return NextResponse.json({ error: 'Failed to create attendance session: ' + error.message }, { status: 500 });
     }
 }
