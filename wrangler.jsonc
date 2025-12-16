@@ -14,7 +14,13 @@
 		{
 			"binding": "HYPERDRIVE",
 			"id": "9366d4f7939e480681b0fa20753a4c8f",
-			"remote": true
+			"localConnectionString": "mysql://u304928495_presentadmin:G9a~-w%3B-h%27z%26mj2@srv2054.hstgr.io:3306/u304928495_lms_db"
+		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "NEXT_INC_CACHE_R2_BUCKET",
+			"bucket_name": "nextjs-cache-bucket"
 		}
 	]
 }
