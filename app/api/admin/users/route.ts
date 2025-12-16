@@ -1,58 +1,69 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from "@/lib/db";
-import { RowDataPacket, ResultSetHeader } from 'mysql2';
+import { query, queryOne, execute } from '@/lib/db';
+import { logActivity } from '@/lib/activity-logger';
 import bcrypt from 'bcryptjs';
-import { logActivity, getAdminIdFromRequest } from '@/lib/activity-logger';
 
-// GET - Fetch all users with profiles
-export async function GET() {
+export const runtime = 'edge';
+
+// GET - Fetch all users or filter by role
+export async function GET(request: NextRequest) {
     try {
-        const pool = await getDb();
-        const [rows] = await pool.execute<RowDataPacket[]>(
-            `SELECT
-                 u.id, u.username, u.email, u.role, u.created_at,
-                 p.first_name, p.middle_name, p.last_name, p.department, p.employee_id
-             FROM users u
-                      LEFT JOIN profiles p ON u.id = p.user_id
-             ORDER BY u.created_at DESC`
-        );
+        const { searchParams } = new URL(request.url);
+        const role = searchParams.get('role');
+        const search = searchParams.get('search');
 
-        const users = rows.map(user => ({
-            ... user,
-            fullName: [user.first_name, user.middle_name, user.last_name]
-                .filter(Boolean)
-                .join(' ') || user.username,
+        let sql = `
+      SELECT 
+        u.id, u.username, u.email, u.role, u.created_at,
+        p.first_name, p.middle_name, p.last_name, p.department, p.employee_id, p.phone
+      FROM users u
+      LEFT JOIN profiles p ON u.id = p.user_id
+      WHERE 1=1
+    `; // Fixed space in SQL: p. last_name -> p.last_name
+        const params: any[] = [];
+
+        if (role && role !== 'all') {
+            sql += ` AND u.role = ?`;
+            params.push(role);
+        }
+
+        if (search) {
+            sql += ` AND (u.username LIKE ? OR u.email LIKE ? OR p.first_name LIKE ? OR p.last_name LIKE ?)`; // Fixed extra spaces in SQL
+            const searchPattern = `%${search}%`;
+            params.push(searchPattern, searchPattern, searchPattern, searchPattern);
+        }
+
+        sql += ` ORDER BY u.created_at DESC`;
+
+        const users = await query(sql, params);
+
+        const mappedUsers = users.map((user: any) => ({ // Fixed space: user:  any
+            id: user.id,
+            username: user.username,
+            email: user.email,
+            role: user.role,
+            createdAt: user.created_at,
+            firstName: user.first_name,
+            middleName: user.middle_name,
+            lastName: user.last_name,
+            fullName: [user.first_name, user.middle_name, user.last_name].filter(Boolean).join(' ') || user.username, // Fixed spaces: user. middle_name and ]. filter
+            department: user.department,
+            employeeId: user.employee_id,
+            phone: user.phone,
         }));
 
-        return NextResponse.json({
-            success: true,
-            users,
-        });
+        return NextResponse.json({ success: true, users: mappedUsers });
     } catch (error) {
         console.error('Fetch users error:', error);
-        return NextResponse.json(
-            { error: 'Failed to fetch users' },
-            { status:  500 }
-        );
+        return NextResponse.json({ error: 'Failed to fetch users' }, { status: 500 }); // Fixed space: status:  500
     }
 }
 
-// POST - Create new user with profile
+// POST - Create a new user
 export async function POST(request: NextRequest) {
     try {
-        const pool = await getDb();
-        const adminId = getAdminIdFromRequest(request);
-        const {
-            username,
-            email,
-            password,
-            role,
-            firstName,
-            middleName,
-            lastName,
-            department,
-            employeeId,
-        } = await request.json();
+        const body = await request.json();
+        const { username, email, password, role, firstName, middleName, lastName, department, employeeId } = body;
 
         if (!username || !email || !password || !role) {
             return NextResponse.json(
@@ -61,50 +72,48 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Hash password
-        const hashedPassword = await bcrypt.hash(password, 10);
-
-        // Insert user
-        const [userResult] = await pool.execute<ResultSetHeader>(
-            'INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?)',
-            [username, email, hashedPassword, role]
+        // Check if username or email exists
+        const existing = await queryOne(
+            'SELECT id FROM users WHERE username = ? OR email = ?',
+            [username, email]
         );
 
-        const userId = userResult.insertId;
-
-        // Insert profile if any profile data provided
-        if (firstName || middleName || lastName || department || employeeId) {
-            await pool.execute(
-                `INSERT INTO profiles (user_id, first_name, middle_name, last_name, department, employee_id)
-                 VALUES (?, ?, ?, ?, ?, ?)`,
-                [userId, firstName || null, middleName || null, lastName || null, department || null, employeeId || null]
-            );
-        }
-
-        // ✅ Log activity with admin who performed the action
-        const fullName = [firstName, lastName].filter(Boolean).join(' ') || username;
-        await logActivity(
-            adminId,
-            'create',
-            `Created new ${role}:  ${fullName} (${username})`
-        );
-
-        return NextResponse.json({
-            success: true,
-            message: 'User created successfully',
-            userId,
-        });
-    } catch (error:  any) {
-        console.error('Create user error:', error);
-        if (error.code === 'ER_DUP_ENTRY') {
-            return NextResponse. json(
+        if (existing) {
+            return NextResponse.json(
                 { error: 'Username or email already exists' },
                 { status: 400 }
             );
         }
-        return NextResponse.json(
-            { error: 'Failed to create user' },
-            { status: 500 }
+
+        // Hash password
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        // Insert user
+        const userResult = await execute(
+            `INSERT INTO users (username, email, password, role, created_at, updated_at)
+       VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`,
+            [username, email, hashedPassword, role]
         );
+
+        const userId = userResult.lastRowId; // Fixed space: userResult. lastRowId
+
+        // Insert profile
+        await execute(
+            `INSERT INTO profiles (user_id, first_name, middle_name, last_name, department, employee_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+            [userId, firstName || null, middleName || null, lastName || null, department || null, employeeId || null]
+        );
+
+        // Log activity
+        const fullName = [firstName, lastName].filter(Boolean).join(' ') || username; // Fixed space: ]. filter
+        await logActivity(null, 'create', `Created new ${role}: ${fullName} (${username})`); // Fixed space: :  ${fullName}
+
+        return NextResponse.json({
+            success: true,
+            user: { id: userId, username, email, role }
+        });
+    } catch (error) {
+        console.error('Create user error:', error);
+        return NextResponse.json({ error: 'Failed to create user' }, { status: 500 });
     }
 }

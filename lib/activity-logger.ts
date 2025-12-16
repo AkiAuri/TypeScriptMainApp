@@ -1,35 +1,33 @@
-import { getDb } from "@/lib/db";
+import { execute } from './db';
 
 export type ActionType = 'login' | 'logout' | 'submission' | 'upload' | 'create' | 'update' | 'delete';
 
 /**
- * Log an activity to the database
- * @param adminUserId - The ID of the admin/user performing the action (null for system actions)
- * @param actionType - The type of action being performed
- * @param description - A description of the action
+ * Log an activity to the activity_logs table
  */
 export async function logActivity(
-    adminUserId: number | null,
+    userId: number | null, // Fixed double space
     actionType: ActionType,
     description: string
 ): Promise<void> {
     try {
-        const pool = await getDb();
-        await pool.execute(
-            'INSERT INTO activity_logs (user_id, action_type, description) VALUES (?, ?, ?)',
-            [adminUserId, actionType, description]
+        await execute(
+            `INSERT INTO activity_logs (user_id, action_type, description, created_at)
+             VALUES (?, ?, ?, datetime('now'))`,
+            [userId, actionType, description]
         );
     } catch (error) {
+        // Log error but don't throw - activity logging shouldn't break the main flow
         console.error('Failed to log activity:', error);
-        // Don't throw - logging should not break the main operation
     }
 }
 
 /**
- * Helper to get admin ID from request headers
- * Frontend should send 'x-admin-id' header with requests
+ * Get admin ID from request (placeholder - implement based on your auth)
  */
-export function getAdminIdFromRequest(request: Request): number | null {
-    const adminId = request.headers.get('x-admin-id');
-    return adminId ? parseInt(adminId, 10) : null;
+export async function getAdminIdFromRequest(request: Request): Promise<number | null> {
+    // You can implement session/cookie parsing here
+    return null;
 }
+
+export default { logActivity, getAdminIdFromRequest };
