@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from "@/lib/db";
 import { RowDataPacket } from 'mysql2';
-import bcrypt from 'bcryptjs';
+import { hash, compare, genSalt } from 'bcrypt-ts';
 import { logActivity, getAdminIdFromRequest } from '@/lib/activity-logger';
 
 // GET - Fetch teacher profile

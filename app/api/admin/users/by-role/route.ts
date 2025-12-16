@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
-import bcrypt from 'bcryptjs';
+import { hash, compare, genSalt } from 'bcrypt-ts';
 import { logActivity, getAdminIdFromRequest } from '@/lib/activity-logger';
 
 // GET - Fetch users by role with profiles (read-only, no logging needed)
@@ -86,7 +86,8 @@ export async function POST(request: NextRequest) {
         }
 
         // Hash password
-        const hashedPassword = await bcrypt.hash(password, 10);
+        const salt = await genSalt(10);
+        const hashedPassword = await hash(password, salt);
 
         // Insert user
         const [userResult] = await pool.execute<ResultSetHeader>(

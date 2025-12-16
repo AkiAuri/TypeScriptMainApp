@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { queryOne, execute } from '@/lib/db';
 import { logActivity } from '@/lib/activity-logger';
-import bcrypt from 'bcryptjs';
+import { hash, compare, genSalt } from 'bcrypt-ts';
 
 export const runtime = 'edge';
 
@@ -52,7 +52,8 @@ export async function PUT(
 
         // Update user
         if (password) {
-            const hashedPassword = await bcrypt.hash(password, 10);
+            const salt = await genSalt(10);
+            const hashedPassword = await hash(password, salt);
             await execute(
                 `UPDATE users SET username = ?, email = ?, password = ?, role = ?, updated_at = datetime('now') WHERE id = ?`,
                 [username, email, hashedPassword, role, id]
