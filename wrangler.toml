@@ -1,0 +1,29 @@
+#: schema node_modules/wrangler/config-schema.json
+name = "lms-app"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# OpenNext configuration
+main = ". open-next/worker.js"
+assets = { directory = ". open-next/assets", binding = "ASSETS" }
+
+# R2 Bucket for Next.js incremental cache (REQUIRED by OpenNext)
+[[r2_buckets]]
+binding = "NEXT_INC_CACHE_R2_BUCKET"
+bucket_name = "lms-cache"
+
+# R2 Bucket for file uploads (student submissions, etc.)
+[[r2_buckets]]
+binding = "R2_BUCKET"
+bucket_name = "lms-uploads"
+
+# D1 Database
+[[d1_databases]]
+binding = "DB"
+database_name = "lms-database"
+database_id = "c4b26ab7-e776-4b0f-a923-173194431173"  # Replace after creating
+
+# Environment variables
+[vars]
+NEXT_PUBLIC_APP_URL = "https://lms-app.pages.dev"
+NODE_ENV = "production"
