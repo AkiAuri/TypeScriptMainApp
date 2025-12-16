@@ -3,7 +3,10 @@
 import { useState, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { ArrowLeft, Save, Loader2, Search, CheckCircle, Clock, XCircle } from "lucide-react"
+import {
+  ArrowLeft, Save, Loader2, Search, CheckCircle, Clock, XCircle,
+  FileText, Image, File, Download, ExternalLink, ChevronDown, ChevronUp
+} from "lucide-react"
 
 interface GradingStudioProps {
   subject: any
@@ -12,27 +15,75 @@ interface GradingStudioProps {
   onBack: () => void
 }
 
+interface SubmissionFile {
+  id:  number
+  name: string
+  type: string
+  url: string
+  uploadedAt?:  string
+}
+
 interface StudentGrade {
   id: number
   name: string
   email: string
-  studentNumber?: string
-  studentSubmissionId?: number
+  studentNumber?:  string
+  studentSubmissionId?:  number
   attemptNumber?: number
   submittedAt?: string
-  grade: number | null
+  grade:  number | null
   feedback: string
   gradedAt?: string
   status: "not_submitted" | "submitted" | "graded"
+  files:  SubmissionFile[]
 }
 
 interface SubmissionDetails {
   id: number
   name: string
-  description?: string
+  description?:  string
   dueDate?: string
   dueTime?: string
   maxAttempts?: number
+}
+
+// Helper function to get file icon based on type
+function getFileIcon(fileType: string) {
+  if (fileType. startsWith('image/')) {
+    return <Image className="w-4 h-4" />
+  }
+  if (fileType === 'application/pdf') {
+    return <FileText className="w-4 h-4 text-red-400" />
+  }
+  if (fileType. includes('word') || fileType.includes('document')) {
+    return <FileText className="w-4 h-4 text-blue-400" />
+  }
+  if (fileType.includes('sheet') || fileType.includes('excel')) {
+    return <FileText className="w-4 h-4 text-green-400" />
+  }
+  if (fileType.includes('presentation') || fileType.includes('powerpoint')) {
+    return <FileText className="w-4 h-4 text-orange-400" />
+  }
+  return <File className="w-4 h-4" />
+}
+
+// Helper function to format file size (if available)
+function formatFileType(type: string): string {
+  const typeMap:  Record<string, string> = {
+    'application/pdf': 'PDF',
+    'application/msword': 'DOC',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'DOCX',
+    'application/vnd.ms-excel': 'XLS',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'XLSX',
+    'application/vnd.ms-powerpoint': 'PPT',
+    'application/vnd.openxmlformats-officedocument.presentationml. presentation': 'PPTX',
+    'text/plain': 'TXT',
+    'image/jpeg': 'JPG',
+    'image/png': 'PNG',
+    'image/gif': 'GIF',
+    'application/zip': 'ZIP',
+  }
+  return typeMap[type] || type. split('/').pop()?. toUpperCase() || 'FILE'
 }
 
 export default function GradingStudio({ subject, taskId, taskTitle, onBack }: GradingStudioProps) {
@@ -44,12 +95,13 @@ export default function GradingStudio({ subject, taskId, taskTitle, onBack }: Gr
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
   const [filterStatus, setFilterStatus] = useState<"all" | "not_submitted" | "submitted" | "graded">("all")
+  const [expandedStudents, setExpandedStudents] = useState<Set<number>>(new Set())
 
   // Track unsaved changes
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
 
   const fetchGrades = useCallback(async () => {
-    if (!subject?.id || !taskId) return
+    if (!subject?. id || !taskId) return
 
     try {
       setIsLoading(true)
@@ -62,9 +114,10 @@ export default function GradingStudio({ subject, taskId, taskTitle, onBack }: Gr
         setSubmission(data.submission)
         setStudents(
             data.students.map((s: any) => ({
-              ...s,
+              ... s,
               grade: s.grade,
               feedback: s.feedback || "",
+              files: s.files || [],
             }))
         )
       } else {
@@ -82,17 +135,29 @@ export default function GradingStudio({ subject, taskId, taskTitle, onBack }: Gr
     fetchGrades()
   }, [fetchGrades])
 
+  const toggleStudentExpanded = (studentId: number) => {
+    setExpandedStudents(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(studentId)) {
+        newSet.delete(studentId)
+      } else {
+        newSet.add(studentId)
+      }
+      return newSet
+    })
+  }
+
   const updateGrade = (studentId: number, grade: number | null) => {
     setStudents(
         students.map((s) =>
-            s.id === studentId ? { ...s, grade, status: grade !== null ? "graded" : s.status } : s
+            s.id === studentId ?  { ...s, grade, status: grade !== null ? "graded" : s.status } : s
         )
     )
     setHasUnsavedChanges(true)
   }
 
-  const updateFeedback = (studentId: number, feedback: string) => {
-    setStudents(students.map((s) => (s.id === studentId ? { ...s, feedback } : s)))
+  const updateFeedback = (studentId:  number, feedback: string) => {
+    setStudents(students.map((s) => (s.id === studentId ?  { ...s, feedback } : s)))
     setHasUnsavedChanges(true)
   }
 
@@ -124,7 +189,7 @@ export default function GradingStudio({ subject, taskId, taskTitle, onBack }: Gr
         setSuccessMessage("Grades saved successfully!")
         setHasUnsavedChanges(false)
         setTimeout(() => setSuccessMessage(null), 3000)
-        fetchGrades() // Refresh to get updated data
+        fetchGrades()
       } else {
         setError(data.error || "Failed to save grades")
       }
@@ -137,7 +202,7 @@ export default function GradingStudio({ subject, taskId, taskTitle, onBack }: Gr
   }
 
   const handleSaveSingleGrade = async (student: StudentGrade) => {
-    if (!subject?.id || !taskId || student.grade === null) return
+    if (!subject?.id || ! taskId || student.grade === null) return
 
     setIsSaving(true)
     try {
@@ -169,7 +234,7 @@ export default function GradingStudio({ subject, taskId, taskTitle, onBack }: Gr
   // Filter students
   const filteredStudents = students.filter((s) => {
     const matchesSearch = s.name.toLowerCase().includes(searchTerm.toLowerCase())
-    const matchesStatus = filterStatus === "all" || s.status === filterStatus
+    const matchesStatus = filterStatus === "all" || s. status === filterStatus
     return matchesSearch && matchesStatus
   })
 
@@ -183,7 +248,7 @@ export default function GradingStudio({ subject, taskId, taskTitle, onBack }: Gr
   const gradesWithValues = students.filter((s) => s.grade !== null)
   const averageGrade =
       gradesWithValues.length > 0
-          ? (gradesWithValues.reduce((sum, s) => sum + (s.grade || 0), 0) / gradesWithValues.length).toFixed(1)
+          ? (gradesWithValues.reduce((sum, s) => sum + (s.grade || 0), 0) / gradesWithValues. length).toFixed(1)
           : "N/A"
 
   if (isLoading) {
@@ -213,8 +278,8 @@ export default function GradingStudio({ subject, taskId, taskTitle, onBack }: Gr
               <span>Back</span>
             </button>
             <div>
-              <h1 className="text-2xl font-bold text-white">Grading: {taskTitle || submission?.name}</h1>
-              <p className="text-slate-400">{subject.name}</p>
+              <h1 className="text-2xl font-bold text-white">Grading:  {taskTitle || submission?.name}</h1>
+              <p className="text-slate-400">{subject. name}</p>
             </div>
           </div>
           <Button
@@ -299,7 +364,7 @@ export default function GradingStudio({ subject, taskId, taskTitle, onBack }: Gr
           </div>
           <select
               value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value as any)}
+              onChange={(e) => setFilterStatus(e. target.value as any)}
               className="px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-primary"
           >
             <option value="all">All Status</option>
@@ -318,89 +383,194 @@ export default function GradingStudio({ subject, taskId, taskTitle, onBack }: Gr
             <div className="text-center py-8 text-slate-400">No students match your filters</div>
         ) : (
             <div className="space-y-3">
-              {filteredStudents.map((student) => (
-                  <Card key={student.id} className="border border-slate-700/50 bg-slate-900">
-                    <CardContent className="pt-4 pb-4">
-                      <div className="flex items-start justify-between gap-4 flex-wrap">
-                        {/* Student Info */}
-                        <div className="flex items-center gap-3 min-w-[200px]">
-                          <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold flex-shrink-0">
-                            {student.name.charAt(0)}
+              {filteredStudents.map((student) => {
+                const isExpanded = expandedStudents.has(student. id)
+                const hasFiles = student.files && student.files.length > 0
+
+                return (
+                    <Card key={student.id} className="border border-slate-700/50 bg-slate-900">
+                      <CardContent className="pt-4 pb-4">
+                        <div className="flex items-start justify-between gap-4 flex-wrap">
+                          {/* Student Info */}
+                          <div className="flex items-center gap-3 min-w-[200px]">
+                            <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold flex-shrink-0">
+                              {student.name.charAt(0)}
+                            </div>
+                            <div>
+                              <p className="font-medium text-white">{student.name}</p>
+                              <p className="text-xs text-slate-400">{student.studentNumber || student.email}</p>
+                            </div>
                           </div>
-                          <div>
-                            <p className="font-medium text-white">{student.name}</p>
-                            <p className="text-xs text-slate-400">{student.studentNumber || student.email}</p>
+
+                          {/* Status Badge & File Count */}
+                          <div className="flex items-center gap-2">
+                            {hasFiles && (
+                                <span className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-blue-900/30 text-blue-300">
+                                  <FileText className="w-3 h-3" />
+                                  {student.files.length} file{student.files.length > 1 ? 's' :  ''}
+                                </span>
+                            )}
+                            {student.status === "graded" || student.grade !== null ? (
+                                <span className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-green-900/30 text-green-300">
+                                  <CheckCircle className="w-3 h-3" />
+                                  Graded
+                                </span>
+                            ) : student.status === "submitted" ? (
+                                <span className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-yellow-900/30 text-yellow-300">
+                                  <Clock className="w-3 h-3" />
+                                  Pending
+                                </span>
+                            ) : (
+                                <span className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-red-900/30 text-red-300">
+                                  <XCircle className="w-3 h-3" />
+                                  Not Submitted
+                                </span>
+                            )}
+                          </div>
+
+                          {/* Grade Input */}
+                          <div className="flex items-center gap-4 flex-wrap">
+                            <div>
+                              <label className="text-xs text-slate-400 block mb-1">Grade</label>
+                              <input
+                                  type="number"
+                                  min="0"
+                                  max="100"
+                                  step="0.5"
+                                  value={student.grade ??  ""}
+                                  onChange={(e) =>
+                                      updateGrade(student.id, e.target.value ? parseFloat(e.target.value) : null)
+                                  }
+                                  placeholder="0-100"
+                                  className="w-24 px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white text-center focus:outline-none focus:border-primary"
+                              />
+                            </div>
+                            <div className="flex-1 min-w-[200px]">
+                              <label className="text-xs text-slate-400 block mb-1">Feedback (optional)</label>
+                              <input
+                                  type="text"
+                                  value={student.feedback}
+                                  onChange={(e) => updateFeedback(student. id, e.target.value)}
+                                  placeholder="Add feedback..."
+                                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus: outline-none focus:border-primary"
+                              />
+                            </div>
+                            <Button
+                                onClick={() => handleSaveSingleGrade(student)}
+                                disabled={isSaving || student.grade === null}
+                                size="sm"
+                                className="bg-blue-600 hover:bg-blue-700 mt-5"
+                            >
+                              Save
+                            </Button>
                           </div>
                         </div>
 
-                        {/* Status Badge */}
-                        <div className="flex items-center gap-2">
-                          {student.status === "graded" || student.grade !== null ? (
-                              <span className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-green-900/30 text-green-300">
-                        <CheckCircle className="w-3 h-3" />
-                        Graded
-                      </span>
-                          ) : student.status === "submitted" ? (
-                              <span className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-yellow-900/30 text-yellow-300">
-                        <Clock className="w-3 h-3" />
-                        Pending
-                      </span>
-                          ) : (
-                              <span className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-red-900/30 text-red-300">
-                        <XCircle className="w-3 h-3" />
-                        Not Submitted
-                      </span>
+                        {/* Submission Info & Toggle */}
+                        <div className="mt-3 pt-3 border-t border-slate-700/50 flex items-center justify-between">
+                          <div className="text-xs text-slate-500">
+                            {student.submittedAt && (
+                                <>
+                                  Submitted:  {new Date(student.submittedAt).toLocaleString()}
+                                  {student.attemptNumber && ` (Attempt ${student.attemptNumber})`}
+                                </>
+                            )}
+                          </div>
+                          {hasFiles && (
+                              <button
+                                  onClick={() => toggleStudentExpanded(student.id)}
+                                  className="flex items-center gap-1 text-xs text-primary hover:text-primary/80 transition-colors"
+                              >
+                                {isExpanded ? (
+                                    <>
+                                      <ChevronUp className="w-4 h-4" />
+                                      Hide Files
+                                    </>
+                                ) : (
+                                    <>
+                                      <ChevronDown className="w-4 h-4" />
+                                      View Files ({student.files.length})
+                                    </>
+                                )}
+                              </button>
                           )}
                         </div>
 
-                        {/* Grade Input */}
-                        <div className="flex items-center gap-4 flex-wrap">
-                          <div>
-                            <label className="text-xs text-slate-400 block mb-1">Grade</label>
-                            <input
-                                type="number"
-                                min="0"
-                                max="100"
-                                step="0.5"
-                                value={student.grade ?? ""}
-                                onChange={(e) =>
-                                    updateGrade(student.id, e.target.value ? parseFloat(e.target.value) : null)
-                                }
-                                placeholder="0-100"
-                                className="w-24 px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white text-center focus:outline-none focus:border-primary"
-                            />
-                          </div>
-                          <div className="flex-1 min-w-[200px]">
-                            <label className="text-xs text-slate-400 block mb-1">Feedback (optional)</label>
-                            <input
-                                type="text"
-                                value={student.feedback}
-                                onChange={(e) => updateFeedback(student.id, e.target.value)}
-                                placeholder="Add feedback..."
-                                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-primary"
-                            />
-                          </div>
-                          <Button
-                              onClick={() => handleSaveSingleGrade(student)}
-                              disabled={isSaving || student.grade === null}
-                              size="sm"
-                              className="bg-blue-600 hover:bg-blue-700 mt-5"
-                          >
-                            Save
-                          </Button>
-                        </div>
-                      </div>
+                        {/* Files Section (Expandable) */}
+                        {isExpanded && hasFiles && (
+                            <div className="mt-4 pt-4 border-t border-slate-700/50">
+                              <h4 className="text-sm font-medium text-slate-300 mb-3">Submitted Files</h4>
+                              <div className="grid gap-2">
+                                {student.files.map((file) => (
+                                    <div
+                                        key={file.id}
+                                        className="flex items-center justify-between p-3 bg-slate-800/50 rounded-lg border border-slate-700/30 hover:bg-slate-800 transition-colors"
+                                    >
+                                      <div className="flex items-center gap-3">
+                                        {getFileIcon(file.type)}
+                                        <div>
+                                          <p className="text-sm text-white font-medium truncate max-w-[300px]">
+                                            {file.name}
+                                          </p>
+                                          <p className="text-xs text-slate-500">
+                                            {formatFileType(file.type)}
+                                            {file.uploadedAt && ` • ${new Date(file.uploadedAt).toLocaleDateString()}`}
+                                          </p>
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <a
+                                            href={file. url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors"
+                                            title="Open in new tab"
+                                        >
+                                          <ExternalLink className="w-4 h-4" />
+                                        </a>
+                                        <a
+                                            href={`${file.url}?download=true`}
+                                            className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors"
+                                            title="Download"
+                                        >
+                                          <Download className="w-4 h-4" />
+                                        </a>
+                                      </div>
+                                    </div>
+                                ))}
+                              </div>
 
-                      {/* Submission Info */}
-                      {student.submittedAt && (
-                          <div className="mt-3 pt-3 border-t border-slate-700/50 text-xs text-slate-500">
-                            Submitted: {new Date(student.submittedAt).toLocaleString()}
-                            {student.attemptNumber && ` (Attempt ${student.attemptNumber})`}
-                          </div>
-                      )}
-                    </CardContent>
-                  </Card>
-              ))}
+                              {/* Image Preview for image files */}
+                              {student.files.some(f => f.type.startsWith('image/')) && (
+                                  <div className="mt-4">
+                                    <h5 className="text-xs font-medium text-slate-400 mb-2">Image Previews</h5>
+                                    <div className="flex gap-2 flex-wrap">
+                                      {student.files
+                                          .filter(f => f.type.startsWith('image/'))
+                                          .map((file) => (
+                                              <a
+                                                  key={file.id}
+                                                  href={file.url}
+                                                  target="_blank"
+                                                  rel="noopener noreferrer"
+                                                  className="block"
+                                              >
+                                                <img
+                                                    src={file.url}
+                                                    alt={file.name}
+                                                    className="h-20 w-20 object-cover rounded-lg border border-slate-700 hover:border-primary transition-colors"
+                                                />
+                                              </a>
+                                          ))}
+                                    </div>
+                                  </div>
+                              )}
+                            </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                )
+              })}
             </div>
         )}
 

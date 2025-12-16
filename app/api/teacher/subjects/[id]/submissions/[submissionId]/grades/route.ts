@@ -8,7 +8,7 @@ async function getDB() {
     return { db, ctx };
 }
 
-// GET - Fetch student submissions for grading
+// GET - Fetch student submissions for grading (with files)
 export async function GET(
     request: NextRequest,
     { params }: { params: Promise<{ id: string; submissionId: string }> }
@@ -20,7 +20,7 @@ export async function GET(
         // Get submission details
         const submission = await db
             .prepare(`
-                SELECT 
+                SELECT
                     ss.id,
                     ss.name,
                     ss.description,
@@ -37,10 +37,10 @@ export async function GET(
             return NextResponse.json({ error: 'Submission not found' }, { status: 404 });
         }
 
-        // Get all students enrolled with their submission status
+        // Get all students enrolled in this subject with their submission status
         const studentsResult = await db
             .prepare(`
-                SELECT 
+                SELECT
                     u.id,
                     u.username,
                     u.email,
@@ -55,32 +55,66 @@ export async function GET(
                     sts.feedback,
                     sts.graded_at
                 FROM subject_students ss
-                JOIN users u ON ss.student_id = u.id
-                LEFT JOIN profiles p ON u.id = p.user_id
-                LEFT JOIN student_submissions sts ON sts.submission_id = ? AND sts.student_id = u.id
+                         JOIN users u ON ss.student_id = u.id
+                         LEFT JOIN profiles p ON u.id = p.user_id
+                         LEFT JOIN student_submissions sts ON sts.submission_id = ? AND sts.student_id = u.id
                 WHERE ss.subject_id = ?
                 ORDER BY p.last_name, p.first_name, u.username
             `)
             .bind(submissionId, subjectId)
             .all();
 
-        const mappedStudents = studentsResult.results.map((student: any) => ({
-            id: student.id,
-            name: [student.first_name, student.middle_name, student.last_name]
-                .filter(Boolean)
-                .join(' ') || student.username,
-            email: student.email,
-            studentNumber: student.student_number,
-            studentSubmissionId: student.student_submission_id,
-            attemptNumber: student.attempt_number,
-            submittedAt: student.submitted_at,
-            grade: student.grade,
-            feedback: student.feedback,
-            gradedAt: student.graded_at,
-            status: student.student_submission_id
-                ? (student.grade !== null ? 'graded' : 'submitted')
-                : 'not_submitted'
-        }));
+        // Get files for each student submission
+        const mappedStudents = await Promise.all(
+            studentsResult.results.map(async (student: any) => {
+                let files: any[] = [];
+
+                // If student has submitted, get their files
+                if (student.student_submission_id) {
+                    const filesResult = await db
+                        .prepare(`
+                            SELECT 
+                                id,
+                                file_name,
+                                file_type,
+                                file_url,
+                                created_at
+                            FROM student_submission_files
+                            WHERE student_submission_id = ?
+                            ORDER BY created_at ASC
+                        `)
+                        .bind(student.student_submission_id)
+                        .all();
+
+                    files = filesResult.results.map((f: any) => ({
+                        id: f.id,
+                        name: f.file_name,
+                        type: f.file_type,
+                        url: f.file_url,
+                        uploadedAt: f.created_at,
+                    }));
+                }
+
+                return {
+                    id: student.id,
+                    name: [student.first_name, student.middle_name, student.last_name]
+                        .filter(Boolean)
+                        .join(' ') || student.username,
+                    email: student.email,
+                    studentNumber: student.student_number,
+                    studentSubmissionId: student.student_submission_id,
+                    attemptNumber: student.attempt_number,
+                    submittedAt: student.submitted_at,
+                    grade: student.grade,
+                    feedback: student.feedback,
+                    gradedAt: student.graded_at,
+                    status: student.student_submission_id
+                        ? (student.grade !== null ? 'graded' : 'submitted')
+                        : 'not_submitted',
+                    files,
+                };
+            })
+        );
 
         return NextResponse.json({
             success: true,
@@ -133,7 +167,7 @@ export async function POST(
         } else {
             await db
                 .prepare(`
-                    UPDATE student_submissions 
+                    UPDATE student_submissions
                     SET grade = ?, feedback = ?, graded_at = datetime('now')
                     WHERE submission_id = ? AND student_id = ?
                 `)
@@ -183,7 +217,7 @@ export async function PUT(
             } else {
                 await db
                     .prepare(`
-                        UPDATE student_submissions 
+                        UPDATE student_submissions
                         SET grade = ?, feedback = ?, graded_at = datetime('now')
                         WHERE submission_id = ? AND student_id = ?
                     `)
