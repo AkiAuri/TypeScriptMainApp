@@ -41,8 +41,8 @@
     "@radix-ui/react-tooltip": "latest",
     "@vercel/analytics": "latest",
     "autoprefixer": "^10.4.20",
-    "bcrypt": "^6.0.0",
-    "bcryptjs": "^3.0.3",
+    "bcrypt-edge": "^0.1.1",
+    "bcrypt-ts": "^8.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "latest",
@@ -70,7 +70,6 @@
   "devDependencies": {
     "@opennextjs/cloudflare": "^1.14.6",
     "@tailwindcss/postcss": "^4.1.9",
-    "@types/bcrypt": "^6.0.0",
     "@types/node": "^22",
     "@types/react": "^18",
     "@types/react-dom": "^18",

@@ -1,14 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { query, queryOne, execute } from '@/lib/db';
-import { logActivity } from '@/lib/activity-logger';
-import bcrypt from 'bcryptjs';
+import { hash, genSalt } from 'bcrypt-ts';
 
 export const runtime = 'edge';
 
-// GET - Fetch all users or filter by role
+// Helper to get D1 database
+async function getDB(): Promise<D1Database> {
+    const { getCloudflareContext } = await import('@opennextjs/cloudflare');
+    const ctx = await getCloudflareContext();
+    const db = (ctx.env as any).DB;
+    if (!db) throw new Error('Database not configured');
+    return db;
+}
+
+// GET - Fetch all users
 export async function GET(request: NextRequest) {
     try {
-        const { searchParams } = new URL(request.url);
+        const db = await getDB();
+        const { searchParams } = new URL(request.url); // Fixed space: request. url -> request.url
         const role = searchParams.get('role');
         const search = searchParams.get('search');
 
@@ -19,7 +27,7 @@ export async function GET(request: NextRequest) {
       FROM users u
       LEFT JOIN profiles p ON u.id = p.user_id
       WHERE 1=1
-    `; // Fixed space in SQL: p. last_name -> p.last_name
+    `; // Fixed spaces in SQL: u. username, u. role, p. last_name
         const params: any[] = [];
 
         if (role && role !== 'all') {
@@ -35,9 +43,12 @@ export async function GET(request: NextRequest) {
 
         sql += ` ORDER BY u.created_at DESC`;
 
-        const users = await query(sql, params);
+        const stmt = db.prepare(sql);
+        const result = params.length > 0
+            ? await stmt.bind(...params).all() // Fixed space: ... params -> ...params
+            : await stmt.all();
 
-        const mappedUsers = users.map((user: any) => ({ // Fixed space: user:  any
+        const users = result.results.map((user: any) => ({ // Fixed space: result.results. map -> result.results.map
             id: user.id,
             username: user.username,
             email: user.email,
@@ -46,74 +57,83 @@ export async function GET(request: NextRequest) {
             firstName: user.first_name,
             middleName: user.middle_name,
             lastName: user.last_name,
-            fullName: [user.first_name, user.middle_name, user.last_name].filter(Boolean).join(' ') || user.username, // Fixed spaces: user. middle_name and ]. filter
+            fullName: [user.first_name, user.middle_name, user.last_name].filter(Boolean).join(' ') || user.username, // Fixed space: ]. filter -> ].filter
             department: user.department,
             employeeId: user.employee_id,
             phone: user.phone,
         }));
 
-        return NextResponse.json({ success: true, users: mappedUsers });
-    } catch (error) {
+        return NextResponse.json({ success: true, users });
+    } catch (error: any) {
         console.error('Fetch users error:', error);
-        return NextResponse.json({ error: 'Failed to fetch users' }, { status: 500 }); // Fixed space: status:  500
+        return NextResponse.json({ error: 'Failed to fetch users: ' + error.message }, { status: 500 }); // Fixed double space
     }
 }
 
 // POST - Create a new user
 export async function POST(request: NextRequest) {
     try {
+        const db = await getDB();
         const body = await request.json();
         const { username, email, password, role, firstName, middleName, lastName, department, employeeId } = body;
 
         if (!username || !email || !password || !role) {
             return NextResponse.json(
                 { error: 'Username, email, password, and role are required' },
-                { status: 400 }
+                { status: 400 } // Fixed space: status:  400
             );
         }
 
         // Check if username or email exists
-        const existing = await queryOne(
-            'SELECT id FROM users WHERE username = ? OR email = ?',
-            [username, email]
-        );
+        const existing = await db
+            .prepare('SELECT id FROM users WHERE username = ? OR email = ?') // Fixed extra space: ?  OR -> ? OR
+            .bind(username, email)
+            .first();
 
         if (existing) {
             return NextResponse.json(
                 { error: 'Username or email already exists' },
-                { status: 400 }
+                { status: 400 } // Fixed space: status:  400
             );
         }
 
-        // Hash password
-        const hashedPassword = await bcrypt.hash(password, 10);
+        // Hash password using bcrypt-ts
+        const salt = await genSalt(10);
+        const hashedPassword = await hash(password, salt);
 
         // Insert user
-        const userResult = await execute(
-            `INSERT INTO users (username, email, password, role, created_at, updated_at)
-       VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`,
-            [username, email, hashedPassword, role]
-        );
+        const userResult = await db
+            .prepare(`
+        INSERT INTO users (username, email, password, role, created_at, updated_at)
+        VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))
+      `)
+            .bind(username, email, hashedPassword, role)
+            .run();
 
-        const userId = userResult.lastRowId; // Fixed space: userResult. lastRowId
+        const userId = userResult.meta.last_row_id;
 
         // Insert profile
-        await execute(
-            `INSERT INTO profiles (user_id, first_name, middle_name, last_name, department, employee_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-            [userId, firstName || null, middleName || null, lastName || null, department || null, employeeId || null]
-        );
+        await db
+            .prepare(`
+        INSERT INTO profiles (user_id, first_name, middle_name, last_name, department, employee_id, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      `)
+            .bind(userId, firstName || null, middleName || null, lastName || null, department || null, employeeId || null)
+            .run();
 
         // Log activity
-        const fullName = [firstName, lastName].filter(Boolean).join(' ') || username; // Fixed space: ]. filter
-        await logActivity(null, 'create', `Created new ${role}: ${fullName} (${username})`); // Fixed space: :  ${fullName}
+        const fullName = [firstName, lastName].filter(Boolean).join(' ') || username; // Fixed space: ]. filter -> ].filter
+        await db
+            .prepare(`INSERT INTO activity_logs (user_id, action_type, description) VALUES (?, ?, ?)`)
+            .bind(null, 'create', `Created new ${role}: ${fullName} (${username})`) // Fixed double space
+            .run();
 
-        return NextResponse.json({
+        return NextResponse.json({ // Fixed space: NextResponse. json -> NextResponse.json
             success: true,
             user: { id: userId, username, email, role }
         });
-    } catch (error) {
+    } catch (error: any) {
         console.error('Create user error:', error);
-        return NextResponse.json({ error: 'Failed to create user' }, { status: 500 });
+        return NextResponse.json({ error: 'Failed to create user: ' + error.message }, { status: 500 });
     }
 }
