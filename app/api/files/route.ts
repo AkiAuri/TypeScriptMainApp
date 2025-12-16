@@ -15,6 +15,9 @@ export async function GET(
     try {
         const { path } = await params;
         const filePath = path.join('/');
+        console.log('--- R2 DEBUG ---');
+        console.log('Raw Path Array:', JSON.stringify(path));
+        console.log('Joined File Path:', filePath);
 
         console.log('Serving file:', filePath);
 
