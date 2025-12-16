@@ -74,7 +74,7 @@ export default function StudentLayout({
       case "subjects":
         return <SubjectsPage studentId={studentId} onSubjectClick={handleSubjectClick} />
       case "attendance":
-        return <AttendancePage studentId={studentId} onSubjectClick={handleSubjectClick} />
+        return <AttendancePage user={user} onSubjectClick={handleSubjectClick} />
       case "grades":
         return <GradesPage studentId={studentId} onSubjectClick={handleSubjectClick} />
       case "inbox":
