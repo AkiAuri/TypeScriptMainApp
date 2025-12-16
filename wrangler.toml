@@ -25,5 +25,5 @@ database_id = "c4b26ab7-e776-4b0f-a923-173194431173"  # Replace after creating
 
 # Environment variables
 [vars]
-NEXT_PUBLIC_APP_URL = "https://lms-app.pages.dev"
+NEXT_PUBLIC_APP_URL = "https://presentlms.taifunesenkari.workers.dev"
 NODE_ENV = "production"
