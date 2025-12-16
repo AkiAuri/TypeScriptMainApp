@@ -4,13 +4,41 @@ async function getR2() {
     const { getCloudflareContext } = await import('@opennextjs/cloudflare');
     const ctx = await getCloudflareContext({ async: true });
     const bucket = (ctx.env as any)?.R2_BUCKET;
-    if (!bucket) throw new Error('R2 bucket not configured');
     return { bucket, ctx };
 }
 
-// Add this to your route.ts file to allow browser testing
+// GET - Check upload endpoint status and R2 availability
 export async function GET() {
-    return NextResponse.json({ message: "R2 Debug endpoint is active. Use POST to upload." });
+    try {
+        const { bucket } = await getR2();
+
+        return NextResponse.json({
+            status: 'active',
+            r2Available: !!bucket,
+            allowedTypes: [
+                'application/pdf',
+                'application/msword',
+                'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'application/vnd.ms-excel',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'application/vnd.ms-powerpoint',
+                'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                'text/plain',
+                'image/jpeg',
+                'image/png',
+                'image/gif',
+                'image/webp',
+                'application/zip',
+            ],
+            maxSizeMB: 10,
+            usage: 'POST with FormData containing: file, folder?, studentId?, submissionId?'
+        });
+    } catch (error: any) {
+        return NextResponse.json({
+            status: 'error',
+            error: error.message
+        }, { status: 500 });
+    }
 }
 
 // POST - Upload file to R2
@@ -18,7 +46,7 @@ export async function POST(request: NextRequest) {
     try {
         const formData = await request.formData();
         const file = formData.get('file') as File | null;
-        const folder = formData.get('folder') as string || 'uploads';
+        const folder = formData.get('folder') as string || 'student-submissions';
         const studentId = formData.get('studentId') as string || 'unknown';
         const submissionId = formData.get('submissionId') as string || 'unknown';
 
@@ -52,33 +80,29 @@ export async function POST(request: NextRequest) {
 
         if (!allowedTypes.includes(file.type)) {
             return NextResponse.json({
-                error: 'File type not allowed. Allowed: PDF, DOC, DOCX, XLS, XLSX, PPT, PPTX, TXT, Images, ZIP, RAR'
+                error: 'File type not allowed',
+                allowedTypes: allowedTypes,
+                receivedType: file.type
             }, { status: 400 });
         }
 
         // Get R2 bucket
-        let bucket;
-        try {
-            const r2 = await getR2();
-            bucket = r2.bucket;
-        } catch (e: any) {
-            console.error('R2 not available:', e);
-            return NextResponse.json(
-                { error: 'File storage not configured', details: e.message },
-                { status: 500 }
-            );
+        const { bucket } = await getR2();
+
+        if (!bucket) {
+            return NextResponse.json({
+                error: 'R2 storage not configured. Add R2_BUCKET binding.'
+            }, { status: 500 });
         }
 
         // Generate unique filename
         const timestamp = Date.now();
         const randomStr = Math.random().toString(36).substring(2, 8);
         const ext = file.name.split('.').pop() || 'bin';
-
-        // File path in R2: folder/studentId_submissionId_timestamp_random.ext
         const fileName = `${studentId}_${submissionId}_${timestamp}_${randomStr}.${ext}`;
         const filePath = `${folder}/${fileName}`;
 
-        console.log('Uploading file to R2:', filePath);
+        console.log('Uploading to R2:', filePath);
 
         // Upload to R2
         const arrayBuffer = await file.arrayBuffer();
@@ -94,10 +118,10 @@ export async function POST(request: NextRequest) {
             },
         });
 
-        // Generate URL that points to our file serving API
+        // Return URL that points to our file serving API
         const fileUrl = `/api/files/${filePath}`;
 
-        console.log('File uploaded successfully:', fileUrl);
+        console.log('Upload successful:', fileUrl);
 
         return NextResponse.json({
             success: true,
@@ -112,10 +136,10 @@ export async function POST(request: NextRequest) {
             }
         });
     } catch (error: any) {
-        console.error('File upload error:', error);
-        return NextResponse.json(
-            { error: 'Failed to upload file', details: error.message },
-            { status: 500 }
-        );
+        console.error('Upload error:', error);
+        return NextResponse.json({
+            error: 'Failed to upload file',
+            details: error.message
+        }, { status: 500 });
     }
 }
