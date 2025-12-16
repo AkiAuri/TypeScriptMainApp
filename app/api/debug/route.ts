@@ -3,64 +3,78 @@ import { NextRequest, NextResponse } from 'next/server';
 export const runtime = 'edge';
 
 export async function GET(request: NextRequest) {
-    const debug: any = { // Fixed space: debug:  any -> debug: any
+    const debug: Record<string, any> = {
         timestamp: new Date().toISOString(),
-        step: 'start',
-        errors: [],
+        nodeVersion: process.version,
+        steps: [],
     };
 
+    // Step 1: Basic response works
+    debug.steps.push('basic_response_ok');
+
+    // Step 2: Check if we're in Cloudflare Workers environment
     try {
-        // Step 1: Try to import getCloudflareContext // Fixed double space
-        debug.step = 'importing getCloudflareContext';
-        const { getCloudflareContext } = await import('@opennextjs/cloudflare');
-        debug.importSuccess = true;
-
-        // Step 2: Get context
-        debug.step = 'getting context';
-        const ctx = await getCloudflareContext();
-        debug.contextSuccess = true;
-        debug.envKeys = Object.keys(ctx.env || {});
-
-        // Step 3: Check DB binding
-        debug.step = 'checking DB binding';
-        const env = ctx.env as any;
-        debug.hasDB = !!env.DB;
-        debug.hasR2 = !!env.R2_BUCKET;
-        debug.hasCache = !!env.NEXT_INC_CACHE_R2_BUCKET;
-
-        if (!env.DB) {
-            debug.errors.push('DB binding not found');
-            return NextResponse.json(debug, { status: 500 });
-        }
-
-        // Step 4: Test query
-        debug.step = 'testing query';
-        const db = env.DB as D1Database;
-
-        const result = await db
-            .prepare('SELECT COUNT(*) as count FROM users')
-            .first<{ count: number }>();
-
-        debug.userCount = result?.count || 0; // Fixed space: result?. count -> result?.count
-        debug.querySuccess = true;
-
-        // Step 5: Get sample user (without password)
-        debug.step = 'getting sample user';
-        const users = await db
-            .prepare('SELECT id, username, email, role FROM users LIMIT 3')
-            .all();
-
-        debug.sampleUsers = users.results; // Fixed space: users. results -> users.results
-
-        debug.step = 'complete';
-        debug.success = true;
-
-        return NextResponse.json(debug);
-
-    } catch (error: any) { // Fixed space: error:  any -> error: any
-        debug.error = error.message; // Fixed space: error. message -> error.message
-        debug.errorStack = error.stack;
-        debug.errors.push(error.message);
-        return NextResponse.json(debug, { status: 500 });
+        // @ts-ignore - Check for Cloudflare-specific globals
+        debug.hasCaches = typeof caches !== 'undefined';
+        debug.steps.push('caches_check_ok');
+    } catch (e: any) { // Fixed space: e:  any -> e: any
+        debug.cachesError = e.message;
     }
+
+    // Step 3: Try to access request context
+    try {
+        // In Cloudflare Workers, the env is passed differently
+        // Let's check various ways to access it
+
+        // Method 1: Check process.env
+        debug.processEnvKeys = Object.keys(process.env).filter(k => !k.startsWith('npm_')); // Fixed spaces: process. env and ! k
+        debug.steps.push('process_env_ok');
+    } catch (e: any) {
+        debug.processEnvError = e.message;
+    }
+
+    // Step 4: Try dynamic import of @opennextjs/cloudflare
+    try {
+        debug.steps.push('attempting_opennext_import'); // Fixed space: debug. steps
+        const opennext = await import('@opennextjs/cloudflare');
+        debug.opennextKeys = Object.keys(opennext);
+        debug.steps.push('opennext_import_ok');
+
+        // Step 5: Try getCloudflareContext
+        if (opennext.getCloudflareContext) {
+            debug.steps.push('attempting_getCloudflareContext');
+            const ctx = await opennext.getCloudflareContext();
+            debug.ctxKeys = Object.keys(ctx);
+            debug.envKeys = Object.keys(ctx.env || {}); // Fixed space: ctx. env
+            debug.steps.push('getCloudflareContext_ok');
+
+            // Check for DB
+            const env = ctx.env as any;
+            debug.hasDB = !!env?.DB; // Fixed spaces: !! env?. DB -> !!env?.DB
+            debug.hasR2 = !!env?.R2_BUCKET; // Fixed space: !!env?. R2_BUCKET -> !!env?.R2_BUCKET
+            debug.hasCache = !!env?.NEXT_INC_CACHE_R2_BUCKET;
+
+            if (env?.DB) {
+                debug.steps.push('DB_binding_found');
+
+                // Try a simple query
+                try {
+                    const result = await env.DB.prepare('SELECT 1 as test').first();
+                    debug.dbTestResult = result;
+                    debug.steps.push('db_query_ok');
+                } catch (dbErr: any) {
+                    debug.dbQueryError = dbErr.message;
+                    debug.steps.push('db_query_failed');
+                }
+            } else {
+                debug.steps.push('DB_binding_missing'); // Fixed space: debug.steps. push
+            }
+        }
+    } catch (e: any) {
+        debug.opennextError = e.message;
+        debug.opennextStack = e.stack?.split('\n').slice(0, 5); // Fixed space: stack?. split
+        debug.steps.push('opennext_import_failed');
+    }
+
+    return NextResponse.json(debug, { status: 200 });
 }
