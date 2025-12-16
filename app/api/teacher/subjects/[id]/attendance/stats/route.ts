@@ -5,11 +5,11 @@ import { RowDataPacket } from 'mysql2';
 // GET - Fetch attendance statistics for a subject
 export async function GET(
     request: NextRequest, // Fixed double space
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
         const pool = await getDb();
-        const subjectId = params.id;
+        const subjectId = (await params).id;
 
         // Get total sessions count
         const [sessionsResult] = await pool.execute<RowDataPacket[]>(`

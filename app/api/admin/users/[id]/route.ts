@@ -7,11 +7,11 @@ import { logActivity, getAdminIdFromRequest } from '@/lib/activity-logger';
 // GET - Fetch single user with profile
 export async function GET(
     request: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
         const pool = await getDb();
-        const { id } = params;
+        const { id } = await params;
 
         const [rows] = await pool.execute<RowDataPacket[]>(`
             SELECT
@@ -36,11 +36,11 @@ export async function GET(
 // PUT - Update user and profile
 export async function PUT(
     request: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
         const pool = await getDb();
-        const { id } = params;
+        const { id } = await params;
         const adminId = getAdminIdFromRequest(request);
         const body = await request.json();
         const {

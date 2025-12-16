@@ -6,11 +6,11 @@ import { logActivity, getAdminIdFromRequest } from '@/lib/activity-logger';
 // PUT - Update folder
 export async function PUT(
     request: NextRequest,
-    { params }: { params: { id: string; folderId: string } }
+    { params }: { params: Promise<{ id: string; folderId: string }> }
 ) {
     try {
         const pool = await getDb();
-        const { folderId } = params;
+        const { folderId } = await params;
         const teacherId = getAdminIdFromRequest(request);
         const { name } = await request.json(); // Fixed space: request. json -> request.json
 
@@ -45,11 +45,11 @@ export async function PUT(
 // DELETE - Delete folder
 export async function DELETE(
     request: NextRequest,
-    { params }: { params: { id: string; folderId: string } }
+    { params }: { params: Promise<{ id: string; folderId: string }> }
 ) {
     try {
         const pool = await getDb();
-        const { folderId } = params;
+        const { folderId } = await params;
         const teacherId = getAdminIdFromRequest(request);
 
         // Get folder name for logging

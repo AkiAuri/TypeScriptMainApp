@@ -6,11 +6,11 @@ import { logActivity, getAdminIdFromRequest } from '@/lib/activity-logger';
 // GET - Fetch attendance sessions for a subject
 export async function GET(
     request: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
         const pool = await getDb();
-        const subjectId = params.id;
+        const subjectId = (await params).id;
 
         const [sessions] = await pool.execute<RowDataPacket[]>(`
       SELECT 
@@ -49,11 +49,11 @@ export async function GET(
 // POST - Create a new attendance session
 export async function POST(
     request: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
         const pool = await getDb();
-        const subjectId = params.id;
+        const subjectId = (await params).id;
         const teacherId = getAdminIdFromRequest(request);
         const body = await request.json();
 

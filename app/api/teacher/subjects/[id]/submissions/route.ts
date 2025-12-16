@@ -6,11 +6,11 @@ import { logActivity, getAdminIdFromRequest } from '@/lib/activity-logger';
 // GET - Fetch all submissions for a subject
 export async function GET(
     request: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
         const pool = await getDb();
-        const subjectId = params.id;
+        const subjectId = (await params).id;
 
         const [submissions] = await pool.execute<RowDataPacket[]>(`
             SELECT

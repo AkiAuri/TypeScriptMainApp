@@ -40,12 +40,12 @@ export async function PUT(
 // DELETE - Delete section
 export async function DELETE(
     request: NextRequest,
-    { params }: { params: { id:  string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
         const pool = await getDb();
         const adminId = getAdminIdFromRequest(request);
-        const { id } = params;
+        const { id } = await params;
 
         // Get section info for logging
         const [data] = await pool.execute<RowDataPacket[]>(

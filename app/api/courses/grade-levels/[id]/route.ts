@@ -6,13 +6,13 @@ import { logActivity, getAdminIdFromRequest } from '@/lib/activity-logger';
 // PUT - Update grade level
 export async function PUT(
     request: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
         const pool = await getDb();
         const adminId = getAdminIdFromRequest(request);
         const { name } = await request.json();
-        const { id } = params;
+        const { id } = await params;
 
         // Get old name for logging
         const [oldData] = await pool.execute<RowDataPacket[]>(
@@ -40,12 +40,12 @@ export async function PUT(
 // DELETE - Delete grade level
 export async function DELETE(
     request: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
         const pool = await getDb();
         const adminId = getAdminIdFromRequest(request);
-        const { id } = params;
+        const { id } = await params;
 
         // Get name for logging
         const [data] = await pool.execute<RowDataPacket[]>(

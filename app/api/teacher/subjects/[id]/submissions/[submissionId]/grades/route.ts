@@ -6,11 +6,11 @@ import { logActivity, getAdminIdFromRequest } from '@/lib/activity-logger';
 // GET - Fetch student submissions for grading
 export async function GET(
     request: NextRequest,
-    { params }: { params: { id: string; submissionId: string } }
+    { params }: { params: Promise<{ id: string; submissionId: string }> }
 ) {
     try {
         const pool = await getDb();
-        const { id: subjectId, submissionId } = params;
+        const { id: subjectId, submissionId } = await params;
 
         // Get submission details
         const [submissions] = await pool.execute<RowDataPacket[]>(`
@@ -87,11 +87,11 @@ export async function GET(
 // POST - Submit grade for a student
 export async function POST(
     request: NextRequest,
-    { params }: { params: { id: string; submissionId: string } }
+    { params }: { params: Promise<{ id: string; submissionId: string }> }
 ) {
     try {
         const pool = await getDb();
-        const { submissionId } = params;
+        const { submissionId } = await params;
         const teacherId = getAdminIdFromRequest(request);
         const body = await request.json();
 
@@ -142,11 +142,11 @@ export async function POST(
 // PUT - Bulk update grades
 export async function PUT(
     request: NextRequest,
-    { params }: { params: { id: string; submissionId: string } }
+    { params }: { params: Promise<{ id: string; submissionId: string }> }
 ) {
     try {
         const pool = await getDb();
-        const { submissionId } = params;
+        const { submissionId } = await params;
         const teacherId = getAdminIdFromRequest(request);
         const body = await request.json();
 

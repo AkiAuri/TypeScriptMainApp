@@ -6,11 +6,11 @@ import { logActivity, getAdminIdFromRequest } from '@/lib/activity-logger';
 // GET - Fetch single attendance session with records
 export async function GET(
     request: NextRequest,
-    { params }: { params: { id: string; sessionId: string } }
+    { params }: { params: Promise<{ id: string; sessionId: string }> }
 ) {
     try {
         const pool = await getDb();
-        const { sessionId } = params;
+        const { sessionId } = await params;
 
         // Get session details
         const [sessions] = await pool.execute<RowDataPacket[]>(`
@@ -61,11 +61,11 @@ export async function GET(
 // PUT - Update attendance session
 export async function PUT(
     request: NextRequest,
-    { params }: { params: { id: string; sessionId: string } }
+    { params }: { params: Promise<{ id: string; sessionId: string }> }
 ) {
     try {
         const pool = await getDb();
-        const { sessionId } = params;
+        const { sessionId } = await params;
         const teacherId = getAdminIdFromRequest(request);
         const body = await request.json();
 
@@ -109,11 +109,11 @@ export async function PUT(
 // DELETE - Delete attendance session
 export async function DELETE(
     request: NextRequest,
-    { params }: { params: { id: string; sessionId: string } }
+    { params }: { params: Promise<{ id: string; sessionId: string }> }
 ) {
     try {
         const pool = await getDb();
-        const { sessionId } = params;
+        const { sessionId } = await params;
         const teacherId = getAdminIdFromRequest(request);
 
         // Get session info for logging

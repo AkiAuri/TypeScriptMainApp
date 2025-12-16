@@ -6,11 +6,12 @@ import { logActivity, getAdminIdFromRequest } from '@/lib/activity-logger';
 // GET - Fetch instructors for a subject
 export async function GET(
     request: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
+        // Await the params
+        const { id } = await params;
         const pool = await getDb();
-        const { id } = params;
 
         const [assigned] = await pool.execute<RowDataPacket[]>(`
             SELECT
@@ -88,12 +89,12 @@ export async function POST(
 // DELETE - Remove instructor from subject
 export async function DELETE(
     request: NextRequest,
-    { params }: { params: { id:  string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
         const pool = await getDb();
         const adminId = getAdminIdFromRequest(request);
-        const { id } = params;
+        const { id } = await params;
         const { searchParams } = new URL(request. url);
         const instructorId = searchParams.get('instructorId');
 

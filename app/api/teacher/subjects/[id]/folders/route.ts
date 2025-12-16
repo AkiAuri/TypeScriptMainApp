@@ -6,11 +6,11 @@ import { logActivity, getAdminIdFromRequest } from '@/lib/activity-logger';
 // GET - Fetch folders for a subject
 export async function GET(
     request: NextRequest,
-    { params }: { params: { id: string } } // Fixed double space
+    { params }: { params: Promise<{ id: string }> } // Fixed double space
 ) {
     try {
         const pool = await getDb();
-        const subjectId = params.id;
+        const subjectId = (await params).id;
 
         const [folders] = await pool.execute<RowDataPacket[]>(`
             SELECT
@@ -80,11 +80,11 @@ export async function GET(
 // POST - Create a new folder
 export async function POST(
     request: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
         const pool = await getDb();
-        const subjectId = params.id;
+        const subjectId = (await params).id;
         const teacherId = getAdminIdFromRequest(request);
         const { name } = await request.json();
 

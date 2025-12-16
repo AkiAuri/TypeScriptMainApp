@@ -76,7 +76,7 @@ export async function DELETE(
 ) {
     try {
         const pool = await getDb();
-        const { submissionId } = params;
+        const { submissionId } = await params;
         const teacherId = getAdminIdFromRequest(request);
 
         // Get submission name for logging

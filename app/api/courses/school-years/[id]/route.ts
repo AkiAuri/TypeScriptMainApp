@@ -6,13 +6,13 @@ import { logActivity, getAdminIdFromRequest } from '@/lib/activity-logger';
 // PUT - Update school year
 export async function PUT(
     request:  NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
         const pool = await getDb();
         const adminId = getAdminIdFromRequest(request);
         const { year } = await request.json();
-        const { id } = params;
+        const { id } = await params;
 
         // Get old year for logging
         const [oldData] = await pool.execute<RowDataPacket[]>(
