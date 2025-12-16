@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import LandingPage from "@/components/landing-page"
 import LoginPage from "@/components/login-page"
 import TeacherDashboard from "@/components/teacher-dashboard"
@@ -11,19 +11,43 @@ import AdminLayout from "@/components/admin/admin-layout"
 // User type for storing logged-in user info
 interface CurrentUser {
   id: number
-  username: string
+  username:  string
   email: string
   fullName: string
-  firstName?: string
+  firstName?:  string
   lastName?: string
   role: "teacher" | "admin" | "student" | "instructor"
 }
 
 export default function Home() {
   const [currentPage, setCurrentPage] = useState<"landing" | "login" | "teacher" | "admin" | "student" | "instructor">(
-      "landing",
+      "landing"
   )
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null)
+  const [isInitialized, setIsInitialized] = useState(false)
+
+  // Check for existing session on mount
+  useEffect(() => {
+    const storedUser = localStorage.getItem("user")
+    if (storedUser) {
+      try {
+        const user = JSON.parse(storedUser) as CurrentUser
+        setCurrentUser(user)
+
+        // Navigate to appropriate dashboard
+        if (user.role === "teacher" || user.role === "instructor") {
+          setCurrentPage("instructor")
+        } else if (user.role === "admin") {
+          setCurrentPage("admin")
+        } else if (user.role === "student") {
+          setCurrentPage("student")
+        }
+      } catch (e) {
+        localStorage.removeItem("user")
+      }
+    }
+    setIsInitialized(true)
+  }, [])
 
   const handleLogin = (
       role: "teacher" | "admin" | "student" | "instructor",
@@ -32,18 +56,24 @@ export default function Home() {
       email?: string,
       fullName?: string,
       firstName?: string,
-      lastName?: string
+      lastName?:  string
   ) => {
-    // Store user data
-    setCurrentUser({
+    // Create user object
+    const user:  CurrentUser = {
       id:  userId || 0,
-      username:  username || "",
-      email: email || "",
-      fullName: fullName || username || "",
+      username: username || "",
+      email:  email || "",
+      fullName:  fullName || username || "",
       firstName: firstName,
-      lastName: lastName,
+      lastName:  lastName,
       role: role,
-    })
+    }
+
+    // Store user data in state
+    setCurrentUser(user)
+
+    // Store in localStorage for persistence (needed for QR attendance)
+    localStorage.setItem("user", JSON.stringify(user))
 
     // Navigate to appropriate dashboard
     if (role === "teacher" || role === "instructor") {
@@ -57,7 +87,20 @@ export default function Home() {
 
   const handleLogout = () => {
     setCurrentUser(null)
+    localStorage.removeItem("user")
     setCurrentPage("landing")
+  }
+
+  // Show loading state while checking for existing session
+  if (!isInitialized) {
+    return (
+        <div className="min-h-screen w-full bg-background flex items-center justify-center">
+          <div className="text-center">
+            <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+            <p className="text-slate-400">Loading... </p>
+          </div>
+        </div>
+    )
   }
 
   const renderPage = () => {
@@ -80,16 +123,15 @@ export default function Home() {
         return (
             <StudentLayout
                 onLogout={handleLogout}
-                studentName={currentUser?.fullName || currentUser?.username || ""}
-                initialPage="profile"
-                userId={currentUser?.id}
+                user={currentUser}
+                initialPage="subjects"
             />
         )
       case "instructor":
         return (
             <InstructorLayout
                 onLogout={handleLogout}
-                user={currentUser}  // ✅ Pass the full user object
+                user={currentUser}
                 initialPage="subjects"
             />
         )
