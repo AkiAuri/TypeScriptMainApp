@@ -18,7 +18,7 @@ export async function GET(
         const { id } = await params;
 
         const schoolYear = await db
-            .prepare('SELECT id, year, is_active, start_date, end_date, created_at FROM school_years WHERE id = ?')
+            .prepare('SELECT * FROM school_years WHERE id = ?')
             .bind(id)
             .first();
 
@@ -26,10 +26,10 @@ export async function GET(
             return NextResponse.json({ error: 'School year not found' }, { status: 404 });
         }
 
-        return NextResponse.json({ success: true, data: schoolYear });
+        return NextResponse.json({ success: true, schoolYear });
     } catch (error: any) {
         console.error('Fetch school year error:', error);
-        return NextResponse.json({ error: 'Failed to fetch school year: ' + error.message }, { status: 500 });
+        return NextResponse.json({ error: error.message }, { status: 500 });
     }
 }
 
@@ -39,54 +39,80 @@ export async function PUT(
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
-        const { db, ctx } = await getDB();
-        const { year, is_active } = await request.json();
+        const { db } = await getDB();
         const { id } = await params;
+        const body = await request.json();
+        const { year, is_active } = body;
 
-        // Get old data for logging
-        const oldData = await db
-            .prepare('SELECT year, is_active FROM school_years WHERE id = ?')
-            .bind(id)
-            .first<{ year: string; is_active: number }>();
-
-        const oldYear = oldData?.year;
-
-        // If setting this year to active, deactivate all others first
-        if (is_active === true || is_active === 1) {
+        // Check if updating is_active status only
+        if (is_active !== undefined && year === undefined) {
             await db
-                .prepare('UPDATE school_years SET is_active = 0 WHERE id != ?')
-                .bind(id)
+                .prepare('UPDATE school_years SET is_active = ?, updated_at = datetime(\'now\') WHERE id = ?')
+                .bind(is_active ? 1 : 0, id)
                 .run();
+
+            return NextResponse.json({ success: true, message: 'Status updated' });
         }
 
-        // Update the target school year
-        // We use COALESCE so we don't accidentally overwrite fields if they aren't provided in the body
+        if (!year?.trim()) {
+            return NextResponse.json({ error: 'School year is required' }, { status: 400 });
+        }
+
+        // Check for duplicate year (excluding current)
+        const existing = await db
+            .prepare('SELECT id FROM school_years WHERE year = ? AND id != ?')
+            .bind(year.trim(), id)
+            .first();
+
+        if (existing) {
+            return NextResponse.json({ error: 'School year already exists' }, { status: 400 });
+        }
+
         await db
-            .prepare(`
-                UPDATE school_years 
-                SET year = COALESCE(?, year), 
-                    is_active = COALESCE(?, is_active), 
-                    updated_at = datetime('now') 
-                WHERE id = ?
-            `)
-            .bind(year, is_active, id)
+            .prepare('UPDATE school_years SET year = ?, is_active = ?, updated_at = datetime(\'now\') WHERE id = ?')
+            .bind(year.trim(), is_active !== undefined ? (is_active ? 1 : 0) : 1, id)
             .run();
-
-        // Log activity (non-blocking)
-        const activeStatusChange = (is_active === true || is_active === 1) ? ' (Set to Active)' : '';
-        const logPromise = db
-            .prepare('INSERT INTO activity_logs (user_id, action_type, description) VALUES (?, ?, ?)')
-            .bind(null, 'update', `Updated school year: "${oldYear}" to "${year || oldYear}"${activeStatusChange}`)
-            .run();
-
-        if (ctx.ctx?.waitUntil) {
-            ctx.ctx.waitUntil(logPromise);
-        }
 
         return NextResponse.json({ success: true });
     } catch (error: any) {
         console.error('Update school year error:', error);
-        return NextResponse.json({ error: 'Failed to update school year: ' + error.message }, { status: 500 });
+        return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+}
+
+// PATCH - Toggle active status
+export async function PATCH(
+    request: NextRequest,
+    { params }: { params: Promise<{ id: string }> }
+) {
+    try {
+        const { db } = await getDB();
+        const { id } = await params;
+
+        const current = await db
+            .prepare('SELECT is_active FROM school_years WHERE id = ?')
+            .bind(id)
+            .first<{ is_active: number }>();
+
+        if (!current) {
+            return NextResponse.json({ error: 'School year not found' }, { status: 404 });
+        }
+
+        const newStatus = current.is_active ? 0 : 1;
+
+        await db
+            .prepare('UPDATE school_years SET is_active = ?, updated_at = datetime(\'now\') WHERE id = ?')
+            .bind(newStatus, id)
+            .run();
+
+        return NextResponse.json({
+            success: true,
+            is_active: newStatus === 1,
+            message: newStatus === 1 ? 'School year activated' : 'School year deactivated'
+        });
+    } catch (error: any) {
+        console.error('Toggle school year status error:', error);
+        return NextResponse.json({ error: error.message }, { status: 500 });
     }
 }
 
@@ -96,35 +122,26 @@ export async function DELETE(
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
-        const { db, ctx } = await getDB();
+        const { db } = await getDB();
         const { id } = await params;
 
-        // Get school year for logging
-        const data = await db
-            .prepare('SELECT year FROM school_years WHERE id = ?')
+        // Check for dependencies (Referential Integrity)
+        const hasSemesters = await db
+            .prepare('SELECT id FROM semesters WHERE school_year_id = ? LIMIT 1')
             .bind(id)
-            .first<{ year: string }>();
+            .first();
 
-        const year = data?.year;
-
-        await db
-            .prepare('DELETE FROM school_years WHERE id = ?')
-            .bind(id)
-            .run();
-
-        // Log activity (non-blocking)
-        const logPromise = db
-            .prepare('INSERT INTO activity_logs (user_id, action_type, description) VALUES (?, ?, ?)')
-            .bind(null, 'delete', `Deleted school year: ${year}`)
-            .run();
-
-        if (ctx.ctx?.waitUntil) {
-            ctx.ctx.waitUntil(logPromise);
+        if (hasSemesters) {
+            return NextResponse.json({
+                error: 'Cannot delete school year with existing semesters. Delete semesters first or deactivate instead.'
+            }, { status: 400 });
         }
+
+        await db.prepare('DELETE FROM school_years WHERE id = ?').bind(id).run();
 
         return NextResponse.json({ success: true });
     } catch (error: any) {
         console.error('Delete school year error:', error);
-        return NextResponse.json({ error: 'Failed to delete school year: ' + error.message }, { status: 500 });
+        return NextResponse.json({ error: error.message }, { status: 500 });
     }
 }

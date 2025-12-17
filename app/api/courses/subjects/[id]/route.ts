@@ -8,7 +8,7 @@ async function getDB() {
     return { db, ctx };
 }
 
-// GET - Fetch single subject
+// GET - Fetch single subject with details
 export async function GET(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
@@ -18,7 +18,20 @@ export async function GET(
         const { id } = await params;
 
         const subject = await db
-            .prepare('SELECT id, name, code, section_id, description, created_at FROM subjects WHERE id = ?')
+            .prepare(`
+                SELECT 
+                    s.*,
+                    sec.name as section_name,
+                    gl.name as grade_level_name,
+                    sem.name as semester_name,
+                    sy.year as school_year
+                FROM subjects s
+                JOIN sections sec ON s.section_id = sec.id
+                JOIN grade_levels gl ON sec.grade_level_id = gl.id
+                JOIN semesters sem ON gl.semester_id = sem.id
+                JOIN school_years sy ON sem.school_year_id = sy.id
+                WHERE s.id = ?
+            `)
             .bind(id)
             .first();
 
@@ -26,10 +39,35 @@ export async function GET(
             return NextResponse.json({ error: 'Subject not found' }, { status: 404 });
         }
 
-        return NextResponse.json({ success: true, data: subject });
+        // Get instructors
+        const instructorsResult = await db
+            .prepare(`
+                SELECT u.id, u.username, u.email, p.first_name, p.last_name
+                FROM subject_instructors si
+                JOIN users u ON si.instructor_id = u.id
+                LEFT JOIN profiles p ON u.id = p.user_id
+                WHERE si.subject_id = ?
+            `)
+            .bind(id)
+            .all();
+
+        // Get student count
+        const studentCount = await db
+            .prepare('SELECT COUNT(*) as count FROM subject_students WHERE subject_id = ?')
+            .bind(id)
+            .first<{ count: number }>();
+
+        return NextResponse.json({
+            success: true,
+            subject: {
+                ...subject,
+                instructors: instructorsResult.results,
+                studentCount: studentCount?.count || 0
+            }
+        });
     } catch (error: any) {
         console.error('Fetch subject error:', error);
-        return NextResponse.json({ error: 'Failed to fetch subject: ' + error.message }, { status: 500 });
+        return NextResponse.json({ error: error.message }, { status: 500 });
     }
 }
 
@@ -39,37 +77,85 @@ export async function PUT(
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
-        const { db, ctx } = await getDB();
-        const { name, code } = await request.json();
+        const { db } = await getDB();
         const { id } = await params;
+        const body = await request.json();
+        const { name, code, description, section_id, is_active } = body;
 
-        // Get old data for logging
-        const oldData = await db
-            .prepare('SELECT name, code FROM subjects WHERE id = ?')
-            .bind(id)
-            .first<{ name: string; code: string }>();
+        // Check if updating is_active status only
+        if (is_active !== undefined && name === undefined && section_id === undefined) {
+            await db
+                .prepare('UPDATE subjects SET is_active = ?, updated_at = datetime(\'now\') WHERE id = ?')
+                .bind(is_active ? 1 : 0, id)
+                .run();
 
-        const oldName = oldData?.name;
+            return NextResponse.json({ success: true, message: 'Status updated' });
+        }
+
+        if (!name?.trim()) {
+            return NextResponse.json({ error: 'Subject name is required' }, { status: 400 });
+        }
+
+        if (!section_id) {
+            return NextResponse.json({ error: 'Section is required' }, { status: 400 });
+        }
 
         await db
-            .prepare('UPDATE subjects SET name = ?, code = ? WHERE id = ?')
-            .bind(name, code || null, id)
+            .prepare(`
+                UPDATE subjects 
+                SET name = ?, code = ?, description = ?, section_id = ?, is_active = ?, updated_at = datetime('now') 
+                WHERE id = ? 
+            `)
+            .bind(
+                name.trim(),
+                code?.trim() || null,
+                description?.trim() || null,
+                section_id,
+                is_active !== undefined ? (is_active ? 1 : 0) : 1,
+                id
+            )
             .run();
-
-        // Log activity (non-blocking)
-        const logPromise = db
-            .prepare('INSERT INTO activity_logs (user_id, action_type, description) VALUES (?, ?, ?)')
-            .bind(null, 'update', `Updated subject: "${oldName}" to "${name}"${code ? ` (${code})` : ''}`)
-            .run();
-
-        if (ctx.ctx?.waitUntil) {
-            ctx.ctx.waitUntil(logPromise);
-        }
 
         return NextResponse.json({ success: true });
     } catch (error: any) {
         console.error('Update subject error:', error);
-        return NextResponse.json({ error: 'Failed to update subject: ' + error.message }, { status: 500 });
+        return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+}
+
+// PATCH - Toggle active status
+export async function PATCH(
+    request: NextRequest,
+    { params }: { params: Promise<{ id: string }> }
+) {
+    try {
+        const { db } = await getDB();
+        const { id } = await params;
+
+        const current = await db
+            .prepare('SELECT is_active FROM subjects WHERE id = ?')
+            .bind(id)
+            .first<{ is_active: number }>();
+
+        if (!current) {
+            return NextResponse.json({ error: 'Subject not found' }, { status: 404 });
+        }
+
+        const newStatus = current.is_active ? 0 : 1;
+
+        await db
+            .prepare('UPDATE subjects SET is_active = ?, updated_at = datetime(\'now\') WHERE id = ?')
+            .bind(newStatus, id)
+            .run();
+
+        return NextResponse.json({
+            success: true,
+            is_active: newStatus === 1,
+            message: newStatus === 1 ? 'Subject activated' : 'Subject deactivated'
+        });
+    } catch (error: any) {
+        console.error('Toggle subject status error:', error);
+        return NextResponse.json({ error: error.message }, { status: 500 });
     }
 }
 
@@ -79,36 +165,34 @@ export async function DELETE(
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
-        const { db, ctx } = await getDB();
+        const { db } = await getDB();
         const { id } = await params;
 
-        // Get subject info for logging
-        const data = await db
-            .prepare('SELECT name, code FROM subjects WHERE id = ?')
+        // Dependency check
+        const hasSubmissions = await db
+            .prepare('SELECT id FROM subject_submissions WHERE subject_id = ? LIMIT 1')
             .bind(id)
-            .first<{ name: string; code: string }>();
+            .first();
 
-        const subjectName = data?.name;
-        const subjectCode = data?.code;
-
-        await db
-            .prepare('DELETE FROM subjects WHERE id = ?')
+        const hasAttendance = await db
+            .prepare('SELECT id FROM attendance_sessions WHERE subject_id = ? LIMIT 1')
             .bind(id)
-            .run();
+            .first();
 
-        // Log activity (non-blocking)
-        const logPromise = db
-            .prepare('INSERT INTO activity_logs (user_id, action_type, description) VALUES (?, ?, ?)')
-            .bind(null, 'delete', `Deleted subject: ${subjectName}${subjectCode ? ` (${subjectCode})` : ''}`)
-            .run();
-
-        if (ctx.ctx?.waitUntil) {
-            ctx.ctx.waitUntil(logPromise);
+        if (hasSubmissions || hasAttendance) {
+            return NextResponse.json({
+                error: 'Cannot delete subject with existing submissions or attendance records. Deactivate instead.'
+            }, { status: 400 });
         }
+
+        // Transaction-like cleanup of join tables
+        await db.prepare('DELETE FROM subject_instructors WHERE subject_id = ?').bind(id).run();
+        await db.prepare('DELETE FROM subject_students WHERE subject_id = ?').bind(id).run();
+        await db.prepare('DELETE FROM subjects WHERE id = ?').bind(id).run();
 
         return NextResponse.json({ success: true });
     } catch (error: any) {
         console.error('Delete subject error:', error);
-        return NextResponse.json({ error: 'Failed to delete subject: ' + error.message }, { status: 500 });
+        return NextResponse.json({ error: error.message }, { status: 500 });
     }
 }
