@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { Menu, X, User, BookOpen, BarChart3, Clock, Mail, LogOut } from "lucide-react"
+import { PresentLogoIcon } from "@/components/icons/present-logo"
 import StudentProfile from "./pages/profile-page"
 import SubjectsPage from "./pages/subjects-page"
 import AttendancePage from "./pages/attendance-page"
@@ -11,10 +12,10 @@ import SubjectDetail from "./pages/subject-detail-page"
 
 interface UserData {
   id: number
-  username: string
+  username:  string
   email: string
   fullName: string
-  firstName?: string
+  firstName?:  string
   lastName?: string
   role: string
 }
@@ -22,9 +23,9 @@ interface UserData {
 interface StudentLayoutProps {
   onLogout: () => void
   user?: UserData | null
-  studentName?: string // Fallback if user is not provided
+  studentName?: string
   initialPage?: "profile" | "subjects" | "attendance" | "grades" | "inbox"
-  userId?: number // Fallback if user is not provided
+  userId?: number
 }
 
 export default function StudentLayout({
@@ -45,7 +46,7 @@ export default function StudentLayout({
   const studentId = user?.id || userId || null
 
   const navItems = [
-    { id: "profile", label: "Profile", icon: User },
+    { id: "profile", label: "Profile", icon:  User },
     { id: "subjects", label: "Subjects", icon: BookOpen },
     { id: "attendance", label: "Attendance", icon: Clock },
     { id: "grades", label: "Grades", icon: BarChart3 },
@@ -113,23 +114,12 @@ export default function StudentLayout({
         <aside
             className={`fixed left-0 top-0 h-screen w-64 bg-card border-r border-border/50 shadow-lg transition-transform duration-300 z-50 flex flex-col ${
                 sidebarOpen ? "translate-x-0" : "-translate-x-full"
-            } md:translate-x-0`}
+            } md: translate-x-0`}
         >
           {/* Logo Header */}
           <div className="bg-gradient-to-b from-green-600 to-green-700 p-6 text-card-foreground">
             <div className="flex items-center gap-3 mb-2">
-              <svg className="h-8 w-8" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path
-                    d="M 60 80 Q 50 80 50 90 L 50 160 Q 50 170 60 170 L 80 170 Q 90 170 90 160 L 90 110 M 90 110 L 110 60 Q 115 45 125 45 Q 135 45 140 55 L 140 160 Q 140 170 150 170 L 160 170 Q 170 170 170 160 L 160 90"
-                    stroke="currentColor"
-                    strokeWidth="8"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                />
-                <rect x="65" y="95" width="8" height="50" fill="currentColor" rx="4" />
-                <rect x="80" y="85" width="8" height="60" fill="currentColor" rx="4" />
-                <rect x="95" y="90" width="8" height="55" fill="currentColor" rx="4" />
-              </svg>
+              <PresentLogoIcon className="h-10 w-10" />
               <h2 className="text-xl font-bold">PRESENT</h2>
             </div>
             <p className="text-sm opacity-90">Student Portal</p>
@@ -148,7 +138,7 @@ export default function StudentLayout({
           <nav className="flex-1 overflow-y-auto p-4 space-y-2">
             {navItems.map((item) => {
               const Icon = item.icon
-              const isActive = currentPage === item.id || (currentPage === "subject-detail" && item.id === "subjects") // Fixed space: item. id -> item.id
+              const isActive = currentPage === item.id || (currentPage === "subject-detail" && item.id === "subjects")
               return (
                   <button
                       key={item.id}
@@ -170,7 +160,7 @@ export default function StudentLayout({
           <div className="p-4 border-t border-border/50">
             <button
                 onClick={handleLogout}
-                className="w-full flex items-center gap-3 px-4 py-3 rounded-lg bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors font-medium" // Fixed space: hover: bg-destructive
+                className="w-full flex items-center gap-3 px-4 py-3 rounded-lg bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors font-medium"
             >
               <LogOut className="h-5 w-5" />
               <span>Sign Out</span>
@@ -184,10 +174,10 @@ export default function StudentLayout({
           <header className="sticky top-0 z-30 border-b border-border/50 bg-background/75 backdrop-blur-md">
             <div className="flex items-center justify-between p-4 sm:px-6">
               <button
-                  onClick={() => setSidebarOpen(!sidebarOpen)} // Fixed space: ! sidebarOpen -> !sidebarOpen
+                  onClick={() => setSidebarOpen(! sidebarOpen)}
                   className="md:hidden p-2 hover:bg-muted rounded-lg transition-colors"
               >
-                {sidebarOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+                {sidebarOpen ?  <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
               </button>
               <div className="flex-1" />
             </div>

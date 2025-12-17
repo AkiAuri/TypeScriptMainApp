@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Eye, EyeOff, Mail, Lock } from "lucide-react"
+import { PresentLogoIcon } from "@/components/icons/present-logo"
 
 interface LoginPageProps {
   onLogin: (
@@ -16,7 +17,7 @@ interface LoginPageProps {
       email?: string,
       fullName?: string
   ) => void
-  onBack:  () => void
+  onBack: () => void
 }
 
 export default function LoginPage({ onLogin, onBack }: LoginPageProps) {
@@ -38,7 +39,7 @@ export default function LoginPage({ onLogin, onBack }: LoginPageProps) {
     e.preventDefault()
     setError("")
 
-    if (!username.trim()) { // Fixed space: username. trim -> username.trim
+    if (!username.trim()) {
       setError("Please enter your username or email")
       return
     }
@@ -55,13 +56,11 @@ export default function LoginPage({ onLogin, onBack }: LoginPageProps) {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ username, password }), // Fixed space: JSON. stringify -> JSON.stringify
+        body: JSON.stringify({ username, password }),
       })
 
-      // Check if response is JSON
       const contentType = response.headers.get('content-type')
       if (!contentType || !contentType.includes('application/json')) {
-        console.error('Non-JSON response:', await response.text())
         setError('Server error. Please try again later.')
         return
       }
@@ -69,16 +68,15 @@ export default function LoginPage({ onLogin, onBack }: LoginPageProps) {
       const data = await response.json()
 
       if (!response.ok) {
-        setError(data.error || 'Invalid credentials. Please check your username and password.') // Fixed double space
+        setError(data.error || 'Invalid credentials. Please check your username and password.')
         return
       }
 
-      if (!data.success) { // Fixed space: ! data.success -> !data.success
+      if (!data.success) {
         setError(data.error || 'Login failed')
         return
       }
 
-      // Successfully authenticated
       const role = data.user.role === 'teacher' ? 'instructor' : data.user.role
 
       onLogin(
@@ -142,32 +140,15 @@ export default function LoginPage({ onLogin, onBack }: LoginPageProps) {
   return (
       <div className="min-h-screen bg-gradient-to-b from-background via-background to-background flex items-center justify-center px-4 py-12">
         <div className="w-full max-w-md space-y-8">
-          {/* Logo and Title */}
           <div className="text-center space-y-2">
             <div className="flex justify-center mb-4">
-              <svg
-                  className="h-12 w-12 text-primary"
-                  viewBox="0 0 200 200"
-                  fill="none"
-                  xmlns="http://www.w3.org/2000/svg"
-              >
-                <path
-                    d="M 60 80 Q 50 80 50 90 L 50 160 Q 50 170 60 170 L 80 170 Q 90 170 90 160 L 90 110 M 90 110 L 110 60 Q 115 45 125 45 Q 135 45 140 55 L 140 160 Q 140 170 150 170 L 160 170 Q 170 170 170 160 L 170 90 M 90 110 L 100 70 Q 105 50 115 50 Q 125 50 130 60 L 130 160 Q 130 170 140 170 L 150 170 Q 160 170 160 160 L 160 100"
-                    stroke="currentColor"
-                    strokeWidth="8"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                />
-                <rect x="65" y="95" width="8" height="50" fill="#6366f1" rx="4" />
-                <rect x="80" y="85" width="8" height="60" fill="#f59e0b" rx="4" />
-                <rect x="95" y="90" width="8" height="55" fill="#ef4444" rx="4" />
-              </svg>
+              <PresentLogoIcon className="h-16 w-16" />
             </div>
             <h1 className="text-3xl font-bold text-foreground">Welcome to PRESENT</h1>
             <p className="text-muted-foreground text-sm">Sign in to your account to continue</p>
           </div>
 
-          {! showForgotPassword ? (
+          {!showForgotPassword ? (
               <Card className="border border-border/50 bg-card shadow-xl">
                 <CardHeader className="space-y-1">
                   <CardTitle className="text-foreground">Login</CardTitle>
@@ -184,9 +165,7 @@ export default function LoginPage({ onLogin, onBack }: LoginPageProps) {
                     )}
 
                     <div className="space-y-2">
-                      <Label htmlFor="username" className="text-foreground">
-                        Username or Email
-                      </Label>
+                      <Label htmlFor="username">Username or Email</Label>
                       <Input
                           id="username"
                           type="text"
@@ -200,9 +179,7 @@ export default function LoginPage({ onLogin, onBack }: LoginPageProps) {
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="password" className="text-foreground">
-                        Password
-                      </Label>
+                      <Label htmlFor="password">Password</Label>
                       <div className="relative">
                         <Input
                             id="password"
@@ -217,10 +194,10 @@ export default function LoginPage({ onLogin, onBack }: LoginPageProps) {
                         <button
                             type="button"
                             onClick={() => setShowPassword(!showPassword)}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors text-sm"
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                             disabled={isLoading}
                         >
-                          {showPassword ?  <EyeOff size={18} /> : <Eye size={18} />}
+                          {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                         </button>
                       </div>
                     </div>
@@ -235,14 +212,12 @@ export default function LoginPage({ onLogin, onBack }: LoginPageProps) {
                   </form>
 
                   <div className="mt-6 space-y-3 text-sm">
-                    <div className="flex justify-between">
-                      <button
-                          onClick={() => setShowForgotPassword(true)}
-                          className="text-primary hover:text-primary/80 transition-colors font-medium"
-                      >
-                        Forgot Password?
-                      </button>
-                    </div>
+                    <button
+                        onClick={() => setShowForgotPassword(true)}
+                        className="text-primary hover:text-primary/80 transition-colors font-medium"
+                    >
+                      Forgot Password?
+                    </button>
                   </div>
                 </CardContent>
               </Card>
@@ -288,9 +263,7 @@ export default function LoginPage({ onLogin, onBack }: LoginPageProps) {
                     {forgotStep === "code" && (
                         <>
                           <div className="space-y-2">
-                            <Label htmlFor="code" className="text-foreground">
-                              Verification Code
-                            </Label>
+                            <Label htmlFor="code">Verification Code</Label>
                             <Input
                                 id="code"
                                 type="text"
@@ -316,15 +289,15 @@ export default function LoginPage({ onLogin, onBack }: LoginPageProps) {
                             <div className="relative">
                               <Input
                                   id="newPass"
-                                  type={showNewPassword ?  "text" : "password"}
+                                  type={showNewPassword ? "text" : "password"}
                                   placeholder="Enter new password"
                                   value={newPassword}
-                                  onChange={(e) => setNewPassword(e.target. value)}
+                                  onChange={(e) => setNewPassword(e.target.value)}
                                   className="bg-input border-border/50 focus:border-primary transition-colors pr-10"
                               />
                               <button
                                   type="button"
-                                  onClick={() => setShowNewPassword(! showNewPassword)}
+                                  onClick={() => setShowNewPassword(!showNewPassword)}
                                   className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
                               >
                                 {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -333,21 +306,19 @@ export default function LoginPage({ onLogin, onBack }: LoginPageProps) {
                           </div>
 
                           <div className="space-y-2">
-                            <Label htmlFor="confirmPass" className="text-foreground">
-                              Confirm Password
-                            </Label>
+                            <Label htmlFor="confirmPass">Confirm Password</Label>
                             <div className="relative">
                               <Input
                                   id="confirmPass"
                                   type={showConfirmPassword ? "text" : "password"}
                                   placeholder="Confirm new password"
                                   value={confirmPassword}
-                                  onChange={(e) => setConfirmPassword(e.target. value)}
+                                  onChange={(e) => setConfirmPassword(e.target.value)}
                                   className="bg-input border-border/50 focus:border-primary transition-colors pr-10"
                               />
                               <button
                                   type="button"
-                                  onClick={() => setShowConfirmPassword(! showConfirmPassword)}
+                                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                                   className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
                               >
                                 {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -377,7 +348,6 @@ export default function LoginPage({ onLogin, onBack }: LoginPageProps) {
               </Card>
           )}
 
-          {/* Back Button */}
           <Button
               variant="outline"
               className="w-full border-border/50 hover:bg-muted/30 text-foreground transition-colors bg-transparent"
